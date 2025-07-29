@@ -60,10 +60,16 @@ const addProduct = async (req, res) => {
   }
 };
 
-// List Products Controller
+// List Products Controller (with optional filters)
 const listProducts = async (req, res) => {
   try {
-    const products = await productModel.find({});
+    const { category, subCategory } = req.query;
+
+    const filter = {};
+    if (category && category !== "All") filter.category = category;
+    if (subCategory) filter.subCategory = subCategory;
+
+    const products = await productModel.find(filter);
     res.json({ success: true, products });
   } catch (error) {
     console.error(error);
