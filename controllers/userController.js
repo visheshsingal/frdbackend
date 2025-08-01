@@ -40,46 +40,36 @@ const sendOTPEmail = async (email, otp) => {
   await transporter.sendMail(mailOptions);
 };
 
-// OTP Verification Function - FIXED VERSION
+// OTP Verification Function
 const verifyOTP = async (req, res) => {
   try {
     const { email, otp } = req.body;
     
-    // Find user with matching email and unexpired OTP
-    const user = await userModel.findOne({ 
-      email,
-      otp,
-      otpExpires: { $gt: new Date() } // Only find unexpired OTPs
-    });
-
+    const user = await userModel.findOne({ email });
     if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "User not found" 
+      });
+    }
+
+    // Verify OTP using the model method
+    const isOTPValid = user.verifyOTP(otp);
+    if (!isOTPValid) {
       return res.status(401).json({ 
         success: false, 
         message: "Invalid or expired OTP" 
       });
     }
 
-    // Clear OTP fields after successful verification
-    user.otp = undefined;
-    user.otpExpires = undefined;
-    user.isVerified = true;
     await user.save();
-
-    // If this is part of login/registration, create token
-    const token = createToken(user._id);
 
     res.json({ 
       success: true, 
-      message: "OTP verified successfully",
-      token: token,
-      user: {
-        name: user.name,
-        email: user.email,
-        isVerified: true
-      }
+      message: "OTP verified successfully" 
     });
   } catch (error) {
-    console.error("OTP Verification Error:", error);
+    console.error(error);
     res.status(500).json({ 
       success: false, 
       message: "Server error during OTP verification" 
@@ -87,7 +77,7 @@ const verifyOTP = async (req, res) => {
   }
 };
 
-// Send OTP Function - FIXED VERSION
+// Send OTP Function
 const sendOTP = async (req, res) => {
   try {
     const { email } = req.body;
@@ -106,13 +96,8 @@ const sendOTP = async (req, res) => {
       user = new userModel({ email });
     }
 
-    // Generate and save OTP
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    user.otp = otp;
-    user.otpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes expiry
-    
-    // MUST save before sending email
-    await user.save(); 
+    const otp = user.generateOTP();
+    await user.save();
     await sendOTPEmail(email, otp);
 
     res.json({ 
@@ -121,7 +106,7 @@ const sendOTP = async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Send OTP Error:", error);
+    console.error(error);
     res.status(500).json({ 
       success: false, 
       message: "Failed to send OTP" 
@@ -129,7 +114,7 @@ const sendOTP = async (req, res) => {
   }
 };
 
-// Login User Function - UPDATED
+// Login User Function
 const loginUser = async (req, res) => {
   try {
     const { email, password, otp } = req.body;
@@ -142,8 +127,7 @@ const loginUser = async (req, res) => {
       });
     }
 
-    // Verify password first
-    const isPasswordValid = await bcrypt.compare(password, user.password);
+    const isPasswordValid = await user.comparePassword(password);
     if (!isPasswordValid) {
       return res.status(401).json({ 
         success: false, 
@@ -151,33 +135,19 @@ const loginUser = async (req, res) => {
       });
     }
 
-    // If OTP is provided, verify it
     if (otp) {
-      const otpValid = await userModel.findOne({
-        email,
-        otp,
-        otpExpires: { $gt: new Date() }
-      });
-
-      if (!otpValid) {
+      const isOTPValid = user.verifyOTP(otp);
+      if (!isOTPValid) {
         return res.status(401).json({ 
           success: false, 
           message: "Invalid or expired OTP" 
         });
       }
-
-      // Clear OTP after successful verification
-      user.otp = undefined;
-      user.otpExpires = undefined;
       await user.save();
-    } 
-    // If no OTP provided but user isn't verified, require OTP
-    else if (!user.isVerified) {
-      const otp = Math.floor(100000 + Math.random() * 900000).toString();
-      user.otp = otp;
-      user.otpExpires = new Date(Date.now() + 10 * 60 * 1000);
+    } else {
+      const newOTP = user.generateOTP();
       await user.save();
-      await sendOTPEmail(email, otp);
+      await sendOTPEmail(email, newOTP);
 
       return res.json({ 
         success: true, 
@@ -198,7 +168,7 @@ const loginUser = async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Login Error:", error);
+    console.error(error);
     res.status(500).json({ 
       success: false, 
       message: "Server error" 
@@ -206,12 +176,11 @@ const loginUser = async (req, res) => {
   }
 };
 
-// Register User Function - UPDATED
+// Register User Function
 const registerUser = async (req, res) => {
   try {
     const { name, email, password, otp } = req.body;
 
-    // Validation
     if (!name || !email || !password) {
       return res.status(400).json({ 
         success: false, 
@@ -233,7 +202,6 @@ const registerUser = async (req, res) => {
       });
     }
 
-    // Check if user exists
     const existingUser = await userModel.findOne({ email });
     if (existingUser) {
       return res.status(409).json({ 
@@ -242,29 +210,19 @@ const registerUser = async (req, res) => {
       });
     }
 
-    // If OTP is provided, verify it
     if (otp) {
-      const otpValid = await userModel.findOne({
-        email,
-        otp,
-        otpExpires: { $gt: new Date() }
-      });
-
-      if (!otpValid) {
+      const tempUser = new userModel({ email, otp: '' });
+      const isOTPValid = tempUser.verifyOTP(otp);
+      if (!isOTPValid) {
         return res.status(401).json({ 
           success: false, 
           message: "Invalid or expired OTP" 
         });
       }
-    } 
-    // If no OTP provided, send one
-    else {
-      const newUser = new userModel({ email });
-      const otp = Math.floor(100000 + Math.random() * 900000).toString();
-      newUser.otp = otp;
-      newUser.otpExpires = new Date(Date.now() + 10 * 60 * 1000);
-      await newUser.save();
-      await sendOTPEmail(email, otp);
+    } else {
+      const tempUser = new userModel({ email });
+      const newOTP = tempUser.generateOTP();
+      await sendOTPEmail(email, newOTP);
 
       return res.json({ 
         success: true, 
@@ -273,14 +231,10 @@ const registerUser = async (req, res) => {
       });
     }
 
-    // Hash password and create user
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
-
     const newUser = new userModel({
       name,
       email,
-      password: hashedPassword,
+      password,
       isVerified: true
     });
 
@@ -292,12 +246,12 @@ const registerUser = async (req, res) => {
       user: {
         name: newUser.name,
         email: newUser.email,
-        isVerified: true
+        isVerified: newUser.isVerified
       }
     });
 
   } catch (error) {
-    console.error("Registration Error:", error);
+    console.error(error);
     res.status(500).json({ 
       success: false, 
       message: "Server error" 
@@ -311,27 +265,14 @@ const adminLogin = async (req, res) => {
     const { email, password } = req.body;
 
     if (email === process.env.ADMIN_EMAIL && password === process.env.ADMIN_PASSWORD) {
-      const token = jwt.sign({ 
-        email, 
-        role: 'admin' 
-      }, process.env.JWT_SECRET);
-      
-      res.json({ 
-        success: true, 
-        token 
-      });
+      const token = jwt.sign(email+password, process.env.JWT_SECRET);
+      res.json({ success: true, token });
     } else {
-      res.json({ 
-        success: false, 
-        message: "Invalid credentials" 
-      });
+      res.json({ success: false, message: "Invalid credentials" });
     }
   } catch (error) {
-    console.log("Admin Login Error:", error);
-    res.json({ 
-      success: false, 
-      message: error.message 
-    });
+    console.log(error);
+    res.json({ success: false, message: error.message });
   }
 };
 
@@ -342,4 +283,4 @@ export {
   adminLogin, 
   sendOTP, 
   verifyOTP 
-};
+}; 
