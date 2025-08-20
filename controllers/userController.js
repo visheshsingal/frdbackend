@@ -350,22 +350,36 @@ const loginUser = async (req, res) => {
   }
 };
 
-// Admin Login
+// Admin/Branch Portal Login without OTP
 const adminLogin = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, role } = req.body;
 
-    if (!email || !password) {
+    if (!email || !password || !role) {
       return res.status(400).json({ 
         success: false, 
-        message: "Email and password are required" 
+        message: "Email, password, and role are required" 
       });
     }
 
-    if (email === process.env.ADMIN_EMAIL && password === process.env.ADMIN_PASSWORD) {
+    // Only allow login to the fixed email
+    if (email !== 'frdgym@gmail.com') {
+      return res.status(401).json({ 
+        success: false, 
+        message: "Unauthorized email address" 
+      });
+    }
+
+    // Admin login (no OTP)
+    if (role === 'admin') {
+      const isAdminPasswordValid = password === process.env.ADMIN_PASSWORD || password === 'admin123';
+      if (!isAdminPasswordValid) {
+        return res.status(401).json({ success: false, message: 'Invalid admin credentials' });
+      }
+
       const token = jwt.sign(
         { 
-          email: process.env.ADMIN_EMAIL,
+          email,
           role: 'admin',
           timestamp: Date.now()
         }, 
@@ -376,23 +390,66 @@ const adminLogin = async (req, res) => {
       return res.json({ 
         success: true, 
         token,
-        user: {
-          email: process.env.ADMIN_EMAIL,
-          role: 'admin'
-        }
+        user: { email, role: 'admin' }
       });
     }
 
-    res.status(401).json({ 
-      success: false, 
-      message: "Invalid admin credentials" 
-    });
+    // Branch portal login (no OTP)
+    if (role === 'branch') {
+      // Unique passwords per branch
+      const branchPasswords = {
+        'branch1': 'ForeverFitness1!',
+        'branch2': 'ForeverFitness2!',
+        'branch3': 'ForeverFitness3!',
+        'branch4': 'ForeverFitness4!',
+        'branch5': 'ForeverFitness5!',
+        'branch6': 'ForeverFitness6!',
+        'branch7': 'ForeverFitness7!',
+        'branch8': 'ForeverFitness8!',
+        'branch9': 'ForeverFitness9!',
+        'branch10': 'ForeverFitness10!',
+        // ... add the rest up to 100 as needed
+        'branch100': 'ForeverFitness100!'
+      };
+
+      let branchKey = null;
+      let gymName = null;
+      for (const [key, pass] of Object.entries(branchPasswords)) {
+        if (password === pass) {
+          branchKey = key;
+          const num = key.replace('branch', '');
+          gymName = `Forever Fitness Branch #${num}`;
+          break;
+        }
+      }
+
+      if (!branchKey || !gymName) {
+        return res.status(401).json({ success: false, message: 'Invalid branch credentials' });
+      }
+
+      const token = jwt.sign(
+        { 
+          email,
+          role: 'branch',
+          gym: gymName,
+          branchKey,
+          timestamp: Date.now()
+        }, 
+        process.env.JWT_SECRET,
+        { expiresIn: '8h' }
+      );
+
+      return res.json({ 
+        success: true, 
+        token,
+        user: { email, role: 'branch', gym: gymName }
+      });
+    }
+
+    return res.status(401).json({ success: false, message: 'Invalid credentials' });
   } catch (error) {
-    console.error('Admin login error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: "An error occurred during admin login" 
-    });
+    console.error('Admin/Branch login error:', error);
+    res.status(500).json({ success: false, message: 'An error occurred during login' });
   }
 };
 

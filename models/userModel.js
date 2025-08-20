@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
 import validator from "validator"; // Importing validator for email validation
 
 const userSchema = new mongoose.Schema({
