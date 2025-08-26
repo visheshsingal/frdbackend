@@ -88,22 +88,28 @@ const listBookings = async (req, res) => {
 };
 
 // Get user bookings
+// Get user bookings - UPDATED VERSION
 const getUserBookings = async (req, res) => {
-  try {
-    const { userId } = req.body;
-    
-    if (!userId) {
-      return res.status(400).json({ success: false, message: 'User ID required' });
-    }
-
-    const bookings = await bookingModel.find({ userId }).sort({ createdAt: -1 });
-    return res.json({ success: true, bookings });
-  } catch (error) {
-    console.log(error);
-    return res.status(500).json({ success: false, message: error.message });
-  }
-};
-
+	try {
+	  // Try to get userId from body (POST) or query (GET)
+	  let userId = req.body.userId || req.query.userId;
+	  
+	  // If no userId provided, try to get from authenticated user
+	  if (!userId && req.user) {
+		userId = req.user._id;
+	  }
+	  
+	  if (!userId) {
+		return res.status(400).json({ success: false, message: 'User ID required' });
+	  }
+  
+	  const bookings = await bookingModel.find({ userId }).sort({ createdAt: -1 });
+	  return res.json({ success: true, bookings });
+	} catch (error) {
+	  console.log(error);
+	  return res.status(500).json({ success: false, message: error.message });
+	}
+  };
 // Get branch bookings (for branch portal)
 const getBranchBookings = async (req, res) => {
   try {
@@ -235,8 +241,8 @@ const cancelBooking = async (req, res) => {
     const transporter = nodemailer.createTransport({
       service: 'gmail',
       auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
       },
     });
     
@@ -259,7 +265,7 @@ const cancelBooking = async (req, res) => {
     
     try {
       const info = await transporter.sendMail({
-        from: `"${gym}" <${process.env.SMTP_USER}>`,
+        from: `"${gym}" <${process.env.EMAIL_USER}>`,
         to: booking.email,
         subject: 'Booking Cancellation Notice',
         text: emailText,
