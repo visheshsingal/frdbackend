@@ -28,13 +28,29 @@ const addProduct = async (req, res) => {
       req.files?.image1?.[0],
       req.files?.image2?.[0],
       req.files?.image3?.[0],
-      req.files?.image4?.[0]
+      req.files?.image4?.[0],
+      req.files?.image5?.[0] // Added 5th image
     ].filter(Boolean);
 
     const imagesUrl = await Promise.all(
       images.map(async (item) => {
         const result = await cloudinary.uploader.upload(item.path, { 
           resource_type: 'image' 
+        });
+        return result.secure_url;
+      })
+    );
+
+    // Process videos
+    const videos = [
+      req.files?.video1?.[0],
+      req.files?.video2?.[0]
+    ].filter(Boolean);
+
+    const videosUrl = await Promise.all(
+      videos.map(async (item) => {
+        const result = await cloudinary.uploader.upload(item.path, { 
+          resource_type: 'video' // Changed to video
         });
         return result.secure_url;
       })
@@ -62,6 +78,7 @@ const addProduct = async (req, res) => {
       bestseller: bestseller === "true",
       sizes: parsedSizes,
       image: imagesUrl,
+      videos: videosUrl, // Added videos
       discount: Math.min(100, Math.max(0, Number(discount))),
       date: Date.now(),
     };
@@ -102,7 +119,8 @@ const updateProduct = async (req, res) => {
       req.files?.image1?.[0],
       req.files?.image2?.[0],
       req.files?.image3?.[0],
-      req.files?.image4?.[0]
+      req.files?.image4?.[0],
+      req.files?.image5?.[0] // Added 5th image
     ].filter(Boolean);
 
     if (newImages.length > 0) {
@@ -110,6 +128,24 @@ const updateProduct = async (req, res) => {
         newImages.map(async (item) => {
           const result = await cloudinary.uploader.upload(item.path, { 
             resource_type: "image" 
+          });
+          return result.secure_url;
+        })
+      );
+    }
+
+    // Process videos if updated
+    let updatedVideos;
+    const newVideos = [
+      req.files?.video1?.[0],
+      req.files?.video2?.[0]
+    ].filter(Boolean);
+
+    if (newVideos.length > 0) {
+      updatedVideos = await Promise.all(
+        newVideos.map(async (item) => {
+          const result = await cloudinary.uploader.upload(item.path, { 
+            resource_type: "video" // Changed to video
           });
           return result.secure_url;
         })
@@ -124,6 +160,7 @@ const updateProduct = async (req, res) => {
         discount: Math.min(100, Math.max(0, Number(updateData.discount)))
       }),
       ...(updatedImages && { image: updatedImages }),
+      ...(updatedVideos && { videos: updatedVideos }), // Added videos
       ...(updateData.bestseller !== undefined && { 
         bestseller: updateData.bestseller === "true" 
       })
@@ -191,7 +228,7 @@ const listProducts = async (req, res) => {
     // Query with discount field explicitly included
     const products = await productModel.find(filter)
       .sort(sort)
-      .select('name price discount image category subCategory date');
+      .select('name price discount image videos category subCategory date'); // Added videos
 
     res.json({ 
       success: true, 
