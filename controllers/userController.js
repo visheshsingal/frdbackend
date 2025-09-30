@@ -9,11 +9,26 @@ const transporter = nodemailer.createTransport({
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS
-  },
-  pool: true,
-  maxConnections: 1,
-  rateLimit: true
+  }
 });
+
+// Password validation function
+const validatePassword = (password) => {
+  const minLength = password.length >= 8;
+  const hasUpperCase = /[A-Z]/.test(password);
+  const hasLowerCase = /[a-z]/.test(password);
+  const specialChars = password.match(/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/g);
+  const hasTwoSpecialChars = specialChars && specialChars.length >= 2;
+
+  return {
+    isValid: minLength && hasUpperCase && hasLowerCase && hasTwoSpecialChars,
+    minLength,
+    hasUpperCase,
+    hasLowerCase,
+    hasTwoSpecialChars,
+    specialCharCount: specialChars ? specialChars.length : 0
+  };
+};
 
 // Helper: Create JWT token
 const createToken = (id) => {
@@ -26,36 +41,32 @@ const createToken = (id) => {
 // Send OTP email
 const sendOTPEmail = async (email, otp) => {
   try {
+    console.log('Attempting to send OTP email to:', email);
+    console.log('Using email user:', process.env.EMAIL_USER);
+
     const mailOptions = {
-      from: `"Auth System" <${process.env.EMAIL_USER}>`,
+      from: `"Admin System" <${process.env.EMAIL_USER}>`,
       to: email,
-      subject: 'Your Secure OTP for Verification',
+      subject: 'Your OTP for Password Change',
       html: `
-        <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden;">
-          <div style="background: #052659; padding: 20px; color: white; text-align: center;">
-            <h1 style="margin: 0; font-size: 24px;">Secure Verification</h1>
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #052659;">Admin Password Change OTP</h2>
+          <p>Your One-Time Password (OTP) for changing admin password is:</p>
+          <div style="background: #f5f5f5; padding: 15px; text-align: center; margin: 20px 0;">
+            <span style="font-size: 24px; font-weight: bold; color: #052659;">${otp}</span>
           </div>
-          <div style="padding: 30px;">
-            <p style="font-size: 16px; color: #333; margin-bottom: 20px;">Your One-Time Password (OTP) for verification is:</p>
-            <div style="background: #f5f5f5; padding: 15px; border-radius: 4px; text-align: center; margin-bottom: 30px;">
-              <span style="font-size: 28px; letter-spacing: 3px; color: #052659; font-weight: bold;">${otp}</span>
-            </div>
-            <p style="font-size: 14px; color: #666; margin-bottom: 5px;">This OTP is valid for 10 minutes.</p>
-            <p style="font-size: 14px; color: #666; margin-bottom: 5px;">Please do not share this code with anyone.</p>
-            <p style="font-size: 14px; color: #666;">If you didn't request this, please ignore this email.</p>
-          </div>
-          <div style="background: #f9f9f9; padding: 15px; text-align: center; font-size: 12px; color: #888;">
-            <p style="margin: 0;">© ${new Date().getFullYear()} Your Company. All rights reserved.</p>
-          </div>
+          <p>This OTP is valid for 10 minutes.</p>
+          <p>If you didn't request this, please ignore this email.</p>
         </div>
       `
     };
 
-    await transporter.sendMail(mailOptions);
-    console.log(`OTP email sent to ${email}`);
+    const info = await transporter.sendMail(mailOptions);
+    console.log('OTP email sent successfully:', info.messageId);
+    return true;
   } catch (error) {
     console.error('Failed to send OTP email:', error);
-    throw new Error('Failed to send OTP email');
+    throw new Error('Failed to send OTP email: ' + error.message);
   }
 };
 
@@ -74,7 +85,7 @@ const sendOTP = async (req, res) => {
     let user = await UserModel.findOne({ email });
     const now = new Date();
     
-    if (user && user.otpSentAt && (now - user.otpSentAt) < 30000) { // 30 seconds cooldown
+    if (user && user.otpSentAt && (now - user.otpSentAt) < 30000) {
       const secondsLeft = Math.ceil((30000 - (now - user.otpSentAt)) / 1000);
       return res.status(429).json({ 
         success: false, 
@@ -86,7 +97,7 @@ const sendOTP = async (req, res) => {
       user = new UserModel({ 
         email, 
         name: "Temp User", 
-        password: "Temp@1234",
+        password: "Temp@1234!!",
         isTemp: true
       });
     }
@@ -130,7 +141,6 @@ const verifyOTP = async (req, res) => {
       });
     }
 
-    // Verify OTP
     const verification = user.verifyOTP(otp);
     if (!verification.isValid) {
       return res.status(401).json({ 
@@ -191,10 +201,20 @@ const registerUser = async (req, res) => {
       });
     }
 
-    if (password.length < 8) {
+    // Enhanced password validation
+    const passwordValidation = validatePassword(password);
+    if (!passwordValidation.isValid) {
+      let errorMessage = "Password must contain:";
+      if (!passwordValidation.minLength) errorMessage += " at least 8 characters,";
+      if (!passwordValidation.hasUpperCase) errorMessage += " one uppercase letter,";
+      if (!passwordValidation.hasLowerCase) errorMessage += " one lowercase letter,";
+      if (!passwordValidation.hasTwoSpecialChars) errorMessage += " at least two special characters,";
+      
+      // Remove trailing comma and add period
+      errorMessage = errorMessage.slice(0, -1) + '.';
       return res.status(400).json({ 
         success: false, 
-        message: "Password must be at least 8 characters long" 
+        message: errorMessage
       });
     }
 
@@ -350,19 +370,18 @@ const loginUser = async (req, res) => {
   }
 };
 
-// Admin/Branch Portal Login without OTP
+// Admin Login
 const adminLogin = async (req, res) => {
   try {
-    const { email, password, role } = req.body;
+    const { email, password } = req.body;
 
-    if (!email || !password || !role) {
+    if (!email || !password) {
       return res.status(400).json({ 
         success: false, 
-        message: "Email, password, and role are required" 
+        message: "Email and password are required" 
       });
     }
 
-    // Only allow login to the fixed email
     if (email !== 'frdgym@gmail.com') {
       return res.status(401).json({ 
         success: false, 
@@ -370,174 +389,172 @@ const adminLogin = async (req, res) => {
       });
     }
 
-    // Admin login (no OTP)
-    if (role === 'admin') {
-      const isAdminPasswordValid = password === process.env.ADMIN_PASSWORD || password === 'admin123';
-      if (!isAdminPasswordValid) {
-        return res.status(401).json({ success: false, message: 'Invalid admin credentials' });
-      }
-
-      const token = jwt.sign(
-        { 
-          email,
-          role: 'admin',
-          timestamp: Date.now()
-        }, 
-        process.env.JWT_SECRET,
-        { expiresIn: '8h' }
-      );
-      
-      return res.json({ 
-        success: true, 
-        token,
-        user: { email, role: 'admin' }
-      });
+    const isAdminPasswordValid = password === process.env.ADMIN_PASSWORD || password === 'Admin@123!!';
+    if (!isAdminPasswordValid) {
+      return res.status(401).json({ success: false, message: 'Invalid admin credentials' });
     }
 
-    // Branch portal login (no OTP)
-    if (role === 'branch') {
-      // Unique passwords per branch
-      const branchPasswords = {
-    'branch1': 'ForeverFitness1!',
-  'branch2': 'ForeverFitness2!',
-  'branch3': 'ForeverFitness3!',
-  'branch4': 'ForeverFitness4!',
-  'branch5': 'ForeverFitness5!',
-  'branch6': 'ForeverFitness6!',
-  'branch7': 'ForeverFitness7!',
-  'branch8': 'ForeverFitness8!',
-  'branch9': 'ForeverFitness9!',
-  'branch10': 'ForeverFitness10!',
-  'branch11': 'ForeverFitness11!',
-  'branch12': 'ForeverFitness12!',
-  'branch13': 'ForeverFitness13!',
-  'branch14': 'ForeverFitness14!',
-  'branch15': 'ForeverFitness15!',
-  'branch16': 'ForeverFitness16!',
-  'branch17': 'ForeverFitness17!',
-  'branch18': 'ForeverFitness18!',
-  'branch19': 'ForeverFitness19!',
-  'branch20': 'ForeverFitness20!',
-  'branch21': 'ForeverFitness21!',
-  'branch22': 'ForeverFitness22!',
-  'branch23': 'ForeverFitness23!',
-  'branch24': 'ForeverFitness24!',
-  'branch25': 'ForeverFitness25!',
-  'branch26': 'ForeverFitness26!',
-  'branch27': 'ForeverFitness27!',
-  'branch28': 'ForeverFitness28!',
-  'branch29': 'ForeverFitness29!',
-  'branch30': 'ForeverFitness30!',
-  'branch31': 'ForeverFitness31!',
-  'branch32': 'ForeverFitness32!',
-  'branch33': 'ForeverFitness33!',
-  'branch34': 'ForeverFitness34!',
-  'branch35': 'ForeverFitness35!',
-  'branch36': 'ForeverFitness36!',
-  'branch37': 'ForeverFitness37!',
-  'branch38': 'ForeverFitness38!',
-  'branch39': 'ForeverFitness39!',
-  'branch40': 'ForeverFitness40!',
-  'branch41': 'ForeverFitness41!',
-  'branch42': 'ForeverFitness42!',
-  'branch43': 'ForeverFitness43!',
-  'branch44': 'ForeverFitness44!',
-  'branch45': 'ForeverFitness45!',
-  'branch46': 'ForeverFitness46!',
-  'branch47': 'ForeverFitness47!',
-  'branch48': 'ForeverFitness48!',
-  'branch49': 'ForeverFitness49!',
-  'branch50': 'ForeverFitness50!',
-  'branch51': 'ForeverFitness51!',
-  'branch52': 'ForeverFitness52!',
-  'branch53': 'ForeverFitness53!',
-  'branch54': 'ForeverFitness54!',
-  'branch55': 'ForeverFitness55!',
-  'branch56': 'ForeverFitness56!',
-  'branch57': 'ForeverFitness57!',
-  'branch58': 'ForeverFitness58!',
-  'branch59': 'ForeverFitness59!',
-  'branch60': 'ForeverFitness60!',
-  'branch61': 'ForeverFitness61!',
-  'branch62': 'ForeverFitness62!',
-  'branch63': 'ForeverFitness63!',
-  'branch64': 'ForeverFitness64!',
-  'branch65': 'ForeverFitness65!',
-  'branch66': 'ForeverFitness66!',
-  'branch67': 'ForeverFitness67!',
-  'branch68': 'ForeverFitness68!',
-  'branch69': 'ForeverFitness69!',
-  'branch70': 'ForeverFitness70!',
-  'branch71': 'ForeverFitness71!',
-  'branch72': 'ForeverFitness72!',
-  'branch73': 'ForeverFitness73!',
-  'branch74': 'ForeverFitness74!',
-  'branch75': 'ForeverFitness75!',
-  'branch76': 'ForeverFitness76!',
-  'branch77': 'ForeverFitness77!',
-  'branch78': 'ForeverFitness78!',
-  'branch79': 'ForeverFitness79!',
-  'branch80': 'ForeverFitness80!',
-  'branch81': 'ForeverFitness81!',
-  'branch82': 'ForeverFitness82!',
-  'branch83': 'ForeverFitness83!',
-  'branch84': 'ForeverFitness84!',
-  'branch85': 'ForeverFitness85!',
-  'branch86': 'ForeverFitness86!',
-  'branch87': 'ForeverFitness87!',
-  'branch88': 'ForeverFitness88!',
-  'branch89': 'ForeverFitness89!',
-  'branch90': 'ForeverFitness90!',
-  'branch91': 'ForeverFitness91!',
-  'branch92': 'ForeverFitness92!',
-  'branch93': 'ForeverFitness93!',
-  'branch94': 'ForeverFitness94!',
-  'branch95': 'ForeverFitness95!',
-  'branch96': 'ForeverFitness96!',
-  'branch97': 'ForeverFitness97!',
-  'branch98': 'ForeverFitness98!',
-  'branch99': 'ForeverFitness99!',
-  'branch100': 'ForeverFitness100!',
-      };
-
-      let branchKey = null;
-      let gymName = null;
-      for (const [key, pass] of Object.entries(branchPasswords)) {
-        if (password === pass) {
-          branchKey = key;
-          const num = key.replace('branch', '');
-          gymName = `Forever Fitness Branch #${num}`;
-          break;
-        }
-      }
-
-      if (!branchKey || !gymName) {
-        return res.status(401).json({ success: false, message: 'Invalid branch credentials' });
-      }
-
-      const token = jwt.sign(
-        { 
-          email,
-          role: 'branch',
-          gym: gymName,
-          branchKey,
-          timestamp: Date.now()
-        }, 
-        process.env.JWT_SECRET,
-        { expiresIn: '8h' }
-      );
-
-      return res.json({ 
-        success: true, 
-        token,
-        user: { email, role: 'branch', gym: gymName }
-      });
-    }
-
-    return res.status(401).json({ success: false, message: 'Invalid credentials' });
+    const token = jwt.sign(
+      { 
+        email,
+        role: 'admin',
+        timestamp: Date.now()
+      }, 
+      process.env.JWT_SECRET,
+      { expiresIn: '8h' }
+    );
+    
+    return res.json({ 
+      success: true, 
+      token,
+      user: { email, role: 'admin' }
+    });
   } catch (error) {
-    console.error('Admin/Branch login error:', error);
+    console.error('Admin login error:', error);
     res.status(500).json({ success: false, message: 'An error occurred during login' });
+  }
+};
+
+// Change Admin Password - Send OTP
+const changeAdminPasswordSendOTP = async (req, res) => {
+  try {
+    const { currentPassword } = req.body;
+    const adminEmail = 'frdgym@gmail.com';
+    const otpEmail = 'vishesh.singal.contact@gmail.com';
+
+    console.log('Change password OTP request received');
+
+    // Verify current password
+    const isCurrentPasswordValid = currentPassword === process.env.ADMIN_PASSWORD || currentPassword === 'Admin@123!!';
+    
+    if (!isCurrentPasswordValid) {
+      console.log('Current password invalid');
+      return res.status(401).json({ 
+        success: false, 
+        message: "Current password is incorrect" 
+      });
+    }
+
+    console.log('Current password verified');
+
+    // Find or create admin user for OTP
+    let adminUser = await UserModel.findOne({ email: adminEmail });
+    if (!adminUser) {
+      console.log('Creating new admin user for OTP');
+      adminUser = new UserModel({ 
+        email: adminEmail, 
+        name: "Admin User", 
+        password: process.env.ADMIN_PASSWORD || 'Admin@123!!',
+        isTemp: false
+      });
+    }
+
+    // Generate OTP
+    const otp = adminUser.generateOTP();
+    await adminUser.save();
+    
+    console.log('OTP generated:', otp);
+    console.log('Sending OTP to:', otpEmail);
+
+    // Send OTP to vishesh.singal.contact@gmail.com
+    await sendOTPEmail(otpEmail, otp);
+
+    console.log('OTP sent successfully');
+
+    res.json({ 
+      success: true, 
+      message: "OTP sent to registered email for password change",
+      email: otpEmail
+    });
+  } catch (error) {
+    console.error('Change password OTP error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: error.message || "An error occurred while sending OTP. Please try again." 
+    });
+  }
+};
+
+// Change Admin Password - Verify OTP and Update
+const changeAdminPasswordVerify = async (req, res) => {
+  try {
+    const { currentPassword, newPassword, confirmPassword, otp } = req.body;
+    const adminEmail = 'frdgym@gmail.com';
+
+    // Validate inputs
+    if (!currentPassword || !newPassword || !confirmPassword || !otp) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "All fields are required" 
+      });
+    }
+
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "New passwords do not match" 
+      });
+    }
+
+    // Enhanced password validation for admin
+    const passwordValidation = validatePassword(newPassword);
+    if (!passwordValidation.isValid) {
+      let errorMessage = "Password must contain:";
+      if (!passwordValidation.minLength) errorMessage += " at least 8 characters,";
+      if (!passwordValidation.hasUpperCase) errorMessage += " one uppercase letter,";
+      if (!passwordValidation.hasLowerCase) errorMessage += " one lowercase letter,";
+      if (!passwordValidation.hasTwoSpecialChars) errorMessage += " at least two special characters,";
+      
+      // Remove trailing comma and add period
+      errorMessage = errorMessage.slice(0, -1) + '.';
+      return res.status(400).json({ 
+        success: false, 
+        message: errorMessage
+      });
+    }
+
+    // Verify current password
+    const isCurrentPasswordValid = currentPassword === process.env.ADMIN_PASSWORD || currentPassword === 'Admin@123!!';
+    if (!isCurrentPasswordValid) {
+      return res.status(401).json({ 
+        success: false, 
+        message: "Current password is incorrect" 
+      });
+    }
+
+    // Find admin user and verify OTP
+    const adminUser = await UserModel.findOne({ email: adminEmail });
+    if (!adminUser) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "Admin user not found" 
+      });
+    }
+
+    const verification = adminUser.verifyOTP(otp);
+    if (!verification.isValid) {
+      return res.status(401).json({ 
+        success: false, 
+        message: verification.message || "Invalid or expired OTP",
+        isExpired: verification.isExpired
+      });
+    }
+
+    // Update environment variable and admin user password
+    process.env.ADMIN_PASSWORD = newPassword;
+    adminUser.password = newPassword;
+    await adminUser.save();
+
+    res.json({
+      success: true,
+      message: "Admin password changed successfully"
+    });
+  } catch (error) {
+    console.error('Change password verification error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: "An error occurred while changing password. Please try again." 
+    });
   }
 };
 
@@ -654,10 +671,20 @@ const resetPassword = async (req, res) => {
       });
     }
 
-    if (newPassword.length < 8) {
+    // Enhanced password validation for reset
+    const passwordValidation = validatePassword(newPassword);
+    if (!passwordValidation.isValid) {
+      let errorMessage = "Password must contain:";
+      if (!passwordValidation.minLength) errorMessage += " at least 8 characters,";
+      if (!passwordValidation.hasUpperCase) errorMessage += " one uppercase letter,";
+      if (!passwordValidation.hasLowerCase) errorMessage += " one lowercase letter,";
+      if (!passwordValidation.hasTwoSpecialChars) errorMessage += " at least two special characters,";
+      
+      // Remove trailing comma and add period
+      errorMessage = errorMessage.slice(0, -1) + '.';
       return res.status(400).json({ 
         success: false, 
-        message: "Password must be at least 8 characters long" 
+        message: errorMessage
       });
     }
 
@@ -716,5 +743,7 @@ export {
   verifyOTP,
   forgotPassword,
   verifyResetOTP,
-  resetPassword
+  resetPassword,
+  changeAdminPasswordSendOTP,
+  changeAdminPasswordVerify
 };
