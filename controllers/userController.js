@@ -3,14 +3,24 @@ import jwt from 'jsonwebtoken';
 import nodemailer from 'nodemailer';
 import UserModel from "../models/userModel.js";
 
-// Email transporter configuration
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
-  }
-});
+// Email transporter configuration with better timeout settings
+const createTransporter = () => {
+  return nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS
+    },
+    // Connection timeout settings
+    connectionTimeout: 10000, // 10 seconds
+    socketTimeout: 15000, // 15 seconds
+    greetingTimeout: 10000, // 10 seconds
+    // Pool configuration
+    pool: true,
+    maxConnections: 3,
+    maxMessages: 100
+  });
+};
 
 // Password validation function
 const validatePassword = (password) => {
@@ -38,36 +48,63 @@ const createToken = (id) => {
   });
 };
 
-// Send OTP email
+// Send OTP email with better error handling
 const sendOTPEmail = async (email, otp) => {
-  try {
-    console.log('Attempting to send OTP email to:', email);
-    console.log('Using email user:', process.env.EMAIL_USER);
+  const transporter = createTransporter();
+  
+  return new Promise((resolve, reject) => {
+    // Set timeout for entire email operation (20 seconds)
+    const timeout = setTimeout(() => {
+      reject(new Error('Email sending timeout - operation took too long'));
+    }, 20000);
 
-    const mailOptions = {
-      from: `"Admin System" <${process.env.EMAIL_USER}>`,
-      to: email,
-      subject: 'Your OTP for Password Change',
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #052659;">Admin Password Change OTP</h2>
-          <p>Your One-Time Password (OTP) for changing admin password is:</p>
-          <div style="background: #f5f5f5; padding: 15px; text-align: center; margin: 20px 0;">
-            <span style="font-size: 24px; font-weight: bold; color: #052659;">${otp}</span>
+    try {
+      console.log('Attempting to send OTP email to:', email);
+
+      const mailOptions = {
+        from: `"Admin System" <${process.env.EMAIL_USER}>`,
+        to: email,
+        subject: 'Your OTP for Password Change',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #052659;">Admin Password Change OTP</h2>
+            <p>Your One-Time Password (OTP) for changing admin password is:</p>
+            <div style="background: #f5f5f5; padding: 15px; text-align: center; margin: 20px 0;">
+              <span style="font-size: 24px; font-weight: bold; color: #052659;">${otp}</span>
+            </div>
+            <p>This OTP is valid for 10 minutes.</p>
+            <p>If you didn't request this, please ignore this email.</p>
           </div>
-          <p>This OTP is valid for 10 minutes.</p>
-          <p>If you didn't request this, please ignore this email.</p>
-        </div>
-      `
-    };
+        `
+      };
 
-    const info = await transporter.sendMail(mailOptions);
-    console.log('OTP email sent successfully:', info.messageId);
-    return true;
-  } catch (error) {
-    console.error('Failed to send OTP email:', error);
-    throw new Error('Failed to send OTP email: ' + error.message);
-  }
+      transporter.sendMail(mailOptions, (error, info) => {
+        clearTimeout(timeout);
+        
+        if (error) {
+          console.error('Email sending failed:', error);
+          
+          // Specific error handling
+          if (error.code === 'ECONNECTION' || error.code === 'ETIMEDOUT') {
+            reject(new Error('Connection to email service failed. Please try again.'));
+          } else if (error.code === 'EAUTH') {
+            reject(new Error('Email authentication failed. Please check email credentials.'));
+          } else {
+            reject(new Error('Failed to send OTP email: ' + error.message));
+          }
+        } else {
+          console.log('OTP email sent successfully:', info.messageId);
+          transporter.close(); // Close the connection
+          resolve(true);
+        }
+      });
+
+    } catch (error) {
+      clearTimeout(timeout);
+      console.error('Unexpected error in sendOTPEmail:', error);
+      reject(new Error('Unexpected error while sending OTP email'));
+    }
+  });
 };
 
 // Send OTP
@@ -116,7 +153,7 @@ const sendOTP = async (req, res) => {
     console.error('OTP sending error:', error);
     res.status(500).json({ 
       success: false, 
-      message: "An error occurred while sending OTP. Please try again later." 
+      message: error.message || "An error occurred while sending OTP. Please try again later." 
     });
   }
 };
@@ -210,7 +247,6 @@ const registerUser = async (req, res) => {
       if (!passwordValidation.hasLowerCase) errorMessage += " one lowercase letter,";
       if (!passwordValidation.hasTwoSpecialChars) errorMessage += " at least two special characters,";
       
-      // Remove trailing comma and add period
       errorMessage = errorMessage.slice(0, -1) + '.';
       return res.status(400).json({ 
         success: false, 
@@ -453,8 +489,8 @@ const changeAdminPasswordSendOTP = async (req, res) => {
     const otp = adminUser.generateOTP();
     await adminUser.save();
     
-    console.log('OTP generated:', otp);
-    console.log('Sending OTP to:', otpEmail);
+    // console.log('OTP generated:', otp);
+    // console.log('Sending OTP to:', otpEmail);
 
     // Send OTP to vishesh.singal.contact@gmail.com
     await sendOTPEmail(otpEmail, otp);
@@ -468,9 +504,20 @@ const changeAdminPasswordSendOTP = async (req, res) => {
     });
   } catch (error) {
     console.error('Change password OTP error:', error);
+    
+    let errorMessage = "An error occurred while sending OTP. Please try again.";
+    
+    if (error.message.includes('timeout')) {
+      errorMessage = "OTP sending is taking too long. Please check your internet connection and try again.";
+    } else if (error.message.includes('Connection to email service failed')) {
+      errorMessage = "Unable to connect to email service. Please try again later.";
+    } else if (error.message.includes('Email authentication failed')) {
+      errorMessage = "Email configuration error. Please contact administrator.";
+    }
+    
     res.status(500).json({ 
       success: false, 
-      message: error.message || "An error occurred while sending OTP. Please try again." 
+      message: errorMessage
     });
   }
 };
@@ -505,7 +552,6 @@ const changeAdminPasswordVerify = async (req, res) => {
       if (!passwordValidation.hasLowerCase) errorMessage += " one lowercase letter,";
       if (!passwordValidation.hasTwoSpecialChars) errorMessage += " at least two special characters,";
       
-      // Remove trailing comma and add period
       errorMessage = errorMessage.slice(0, -1) + '.';
       return res.status(400).json({ 
         success: false, 
@@ -680,7 +726,6 @@ const resetPassword = async (req, res) => {
       if (!passwordValidation.hasLowerCase) errorMessage += " one lowercase letter,";
       if (!passwordValidation.hasTwoSpecialChars) errorMessage += " at least two special characters,";
       
-      // Remove trailing comma and add period
       errorMessage = errorMessage.slice(0, -1) + '.';
       return res.status(400).json({ 
         success: false, 
