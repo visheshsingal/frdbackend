@@ -1,37 +1,31 @@
 import validator from "validator";
-import jwt from 'jsonwebtoken';
-import nodemailer from 'nodemailer';
+import jwt from "jsonwebtoken";
+import nodemailer from "nodemailer";
 import UserModel from "../models/userModel.js";
 
 // Email transporter configuration optimized for cloud platforms
 const createTransporter = () => {
-  // Use different configurations for different environments
   if (process.env.NODE_ENV === 'production') {
-    // Production configuration for Render/Vercel
     return nodemailer.createTransport({
       host: 'smtp.gmail.com',
       port: 587,
-      secure: false, // Use TLS
+      secure: false, // TLS on 587
       auth: {
         user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS
+        pass: process.env.EMAIL_PASS // Must be App Password
       },
-      // Optimized for cloud environments
-      connectionTimeout: 15000, // 15 seconds
-      socketTimeout: 15000, // 15 seconds
-      greetingTimeout: 10000, // 10 seconds
-      // Retry configuration
-      retries: 2,
-      // DNS timeout
-      dnsTimeout: 10000,
-      // Better TLS handling
+      connectionTimeout: 30000, // 30s for cloud networks
+      socketTimeout: 30000,
+      greetingTimeout: 20000,
+      pool: true, // Reuse connections
+      maxConnections: 5,
+      maxMessages: 100,
       tls: {
-        rejectUnauthorized: false, // Important for some cloud environments
-        ciphers: 'SSLv3'
+        rejectUnauthorized: true // Strict cert validation
+        // No ciphers specified—use Node.js defaults (secure)
       }
     });
   } else {
-    // Development configuration
     return nodemailer.createTransport({
       service: 'gmail',
       auth: {
@@ -62,25 +56,27 @@ const validatePassword = (password) => {
 
 // Helper: Create JWT token
 const createToken = (id) => {
-  return jwt.sign({ id }, process.env.JWT_SECRET, { 
+  return jwt.sign({ id }, process.env.JWT_SECRET, {
     expiresIn: '1d',
     algorithm: 'HS256'
   });
 };
 
-// Send OTP email with better error handling for cloud
+// Send OTP email with better error handling
 const sendOTPEmail = async (email, otp) => {
   const transporter = createTransporter();
-  
-  return new Promise((resolve, reject) => {
-    // Set timeout for entire email operation
+
+  return new Promise(async (resolve, reject) => {
     const timeout = setTimeout(() => {
       reject(new Error('Email sending timeout - please try again'));
-    }, 20000);
+    }, 30000);
 
     try {
-      console.log('Attempting to send OTP email to:', email);
-      console.log('Environment:', process.env.NODE_ENV);
+      console.log('Verifying SMTP connection...');
+      await transporter.verify(); // Check SMTP config
+      console.log('SMTP connection verified for:', process.env.EMAIL_USER);
+
+      console.log('Sending OTP to:', email, 'in environment:', process.env.NODE_ENV);
 
       const mailOptions = {
         from: `"Admin System" <${process.env.EMAIL_USER}>`,
@@ -101,33 +97,26 @@ const sendOTPEmail = async (email, otp) => {
 
       transporter.sendMail(mailOptions, (error, info) => {
         clearTimeout(timeout);
-        
         if (error) {
-          console.error('Email sending failed:', error);
-          console.error('Error code:', error.code);
-          console.error('Error command:', error.command);
-          
-          // Specific error handling for cloud environments
+          console.error('Email sending failed:', JSON.stringify(error, null, 2));
           if (error.code === 'ECONNECTION' || error.code === 'ETIMEDOUT') {
-            reject(new Error('Unable to connect to email service. This might be a platform restriction.'));
+            reject(new Error('SMTP port blocked or network issue. Check platform restrictions or switch to an email API service.'));
           } else if (error.code === 'EAUTH') {
-            reject(new Error('Email authentication failed. Please check your email credentials.'));
+            reject(new Error('Email authentication failed. Verify your Gmail App Password.'));
           } else if (error.code === 'ESOCKET') {
             reject(new Error('Network connection issue. Please try again.'));
           } else {
-            reject(new Error('Failed to send OTP email. Please try again.'));
+            reject(new Error(`Failed to send OTP email: ${error.message}`));
           }
         } else {
-          console.log('OTP email sent successfully:', info.messageId);
-          console.log('Response:', info.response);
+          console.log('OTP email sent:', info.messageId, 'Response:', info.response);
           resolve(true);
         }
       });
-
     } catch (error) {
       clearTimeout(timeout);
-      console.error('Unexpected error in sendOTPEmail:', error);
-      reject(new Error('Unexpected error while sending OTP email'));
+      console.error('Transporter verification failed:', error);
+      reject(new Error(`SMTP setup error: ${error.message}. Check EMAIL_USER and EMAIL_PASS.`));
     }
   });
 };
@@ -138,27 +127,27 @@ const sendOTP = async (req, res) => {
     const { email } = req.body;
 
     if (!validator.isEmail(email)) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Please provide a valid email address" 
+      return res.status(400).json({
+        success: false,
+        message: "Please provide a valid email address"
       });
     }
 
     let user = await UserModel.findOne({ email });
     const now = new Date();
-    
+
     if (user && user.otpSentAt && (now - user.otpSentAt) < 30000) {
       const secondsLeft = Math.ceil((30000 - (now - user.otpSentAt)) / 1000);
-      return res.status(429).json({ 
-        success: false, 
-        message: `Please wait ${secondsLeft} seconds before requesting a new OTP` 
+      return res.status(429).json({
+        success: false,
+        message: `Please wait ${secondsLeft} seconds before requesting a new OTP`
       });
     }
 
     if (!user) {
-      user = new UserModel({ 
-        email, 
-        name: "Temp User", 
+      user = new UserModel({
+        email,
+        name: "Temp User",
         password: "Temp@1234!!",
         isTemp: true
       });
@@ -166,19 +155,19 @@ const sendOTP = async (req, res) => {
 
     const otp = user.generateOTP();
     await user.save();
-    
+
     await sendOTPEmail(email, otp);
 
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       message: "OTP sent successfully. Please check your email.",
       email: email
     });
   } catch (error) {
     console.error('OTP sending error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message || "An error occurred while sending OTP. Please try again later." 
+    res.status(500).json({
+      success: false,
+      message: error.message || "An error occurred while sending OTP. Please try again later."
     });
   }
 };
@@ -189,34 +178,34 @@ const verifyOTP = async (req, res) => {
     const { email, otp } = req.body;
 
     if (!email || !otp) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Email and OTP are required" 
+      return res.status(400).json({
+        success: false,
+        message: "Email and OTP are required"
       });
     }
 
     const user = await UserModel.findOne({ email });
     if (!user) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "No account found with this email. Please register first." 
+      return res.status(404).json({
+        success: false,
+        message: "No account found with this email. Please register first."
       });
     }
 
     const verification = user.verifyOTP(otp);
     if (!verification.isValid) {
-      return res.status(401).json({ 
-        success: false, 
+      return res.status(401).json({
+        success: false,
         message: verification.message || "Invalid or expired OTP",
         isExpired: verification.isExpired
       });
     }
 
     await user.save();
-    
+
     if (user.isTemp) {
-      return res.json({ 
-        success: true, 
+      return res.json({
+        success: true,
         message: "OTP verified. Please complete your registration.",
         requiresRegistration: true,
         email: user.email
@@ -224,7 +213,7 @@ const verifyOTP = async (req, res) => {
     }
 
     const token = createToken(user._id);
-    
+
     res.json({
       success: true,
       message: "OTP verified successfully",
@@ -237,9 +226,9 @@ const verifyOTP = async (req, res) => {
     });
   } catch (error) {
     console.error('OTP verification error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: "An error occurred during verification. Please try again." 
+    res.status(500).json({
+      success: false,
+      message: "An error occurred during verification. Please try again."
     });
   }
 };
@@ -250,20 +239,19 @@ const registerUser = async (req, res) => {
     const { name, email, password, otp } = req.body;
 
     if (!name || !email || !password) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Name, email and password are required" 
+      return res.status(400).json({
+        success: false,
+        message: "Name, email and password are required"
       });
     }
 
     if (!validator.isEmail(email)) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Please provide a valid email address" 
+      return res.status(400).json({
+        success: false,
+        message: "Please provide a valid email address"
       });
     }
 
-    // Enhanced password validation
     const passwordValidation = validatePassword(password);
     if (!passwordValidation.isValid) {
       let errorMessage = "Password must contain:";
@@ -271,10 +259,10 @@ const registerUser = async (req, res) => {
       if (!passwordValidation.hasUpperCase) errorMessage += " one uppercase letter,";
       if (!passwordValidation.hasLowerCase) errorMessage += " one lowercase letter,";
       if (!passwordValidation.hasTwoSpecialChars) errorMessage += " at least two special characters,";
-      
+
       errorMessage = errorMessage.slice(0, -1) + '.';
-      return res.status(400).json({ 
-        success: false, 
+      return res.status(400).json({
+        success: false,
         message: errorMessage
       });
     }
@@ -283,22 +271,22 @@ const registerUser = async (req, res) => {
 
     if (user) {
       if (!user.isTemp && user.password) {
-        return res.status(409).json({ 
-          success: false, 
-          message: "An account already exists with this email. Please login instead." 
+        return res.status(409).json({
+          success: false,
+          message: "An account already exists with this email. Please login instead."
         });
       }
 
       if (otp) {
         const verification = user.verifyOTP(otp);
         if (!verification.isValid) {
-          return res.status(401).json({ 
-            success: false, 
+          return res.status(401).json({
+            success: false,
             message: verification.message || "Invalid or expired OTP",
             isExpired: verification.isExpired
           });
         }
-        
+
         user.name = name;
         user.password = password;
         user.isTemp = false;
@@ -320,19 +308,19 @@ const registerUser = async (req, res) => {
         const newOTP = user.generateOTP();
         await user.save();
         await sendOTPEmail(email, newOTP);
-        
-        return res.json({ 
-          success: true, 
-          message: "OTP sent to your email", 
+
+        return res.json({
+          success: true,
+          message: "OTP sent to your email",
           requiresOTP: true,
           email: user.email
         });
       }
     }
 
-    const newUser = new UserModel({ 
-      name, 
-      email, 
+    const newUser = new UserModel({
+      name,
+      email,
       password,
       isVerified: false
     });
@@ -341,17 +329,17 @@ const registerUser = async (req, res) => {
     await newUser.save();
     await sendOTPEmail(email, newOTP);
 
-    res.status(200).json({ 
-      success: true, 
+    res.status(200).json({
+      success: true,
       message: "OTP sent to your email for verification",
       requiresOTP: true,
       email: newUser.email
     });
   } catch (error) {
     console.error('Registration error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: "An error occurred during registration. Please try again." 
+    res.status(500).json({
+      success: false,
+      message: "An error occurred during registration. Please try again."
     });
   }
 };
@@ -362,24 +350,24 @@ const loginUser = async (req, res) => {
     const { email, password, otp } = req.body;
 
     if (!email || !password) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Email and password are required" 
+      return res.status(400).json({
+        success: false,
+        message: "Email and password are required"
       });
     }
 
     const user = await UserModel.findOne({ email });
     if (!user) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "No account found with this email. Please register first." 
+      return res.status(404).json({
+        success: false,
+        message: "No account found with this email. Please register first."
       });
     }
 
     const isPasswordValid = await user.comparePassword(password);
     if (!isPasswordValid) {
-      return res.status(401).json({ 
-        success: false, 
+      return res.status(401).json({
+        success: false,
         message: "Incorrect email or password",
         requiresOTP: false
       });
@@ -388,22 +376,22 @@ const loginUser = async (req, res) => {
     if (otp) {
       const verification = user.verifyOTP(otp);
       if (!verification.isValid) {
-        return res.status(401).json({ 
-          success: false, 
+        return res.status(401).json({
+          success: false,
           message: verification.message || "Invalid or expired OTP",
           isExpired: verification.isExpired,
           requiresOTP: true
         });
       }
-      
+
       await user.save();
     } else {
       const newOTP = user.generateOTP();
       await user.save();
       await sendOTPEmail(email, newOTP);
-      
-      return res.json({ 
-        success: true, 
+
+      return res.json({
+        success: true,
         message: "OTP sent to your email for verification",
         requiresOTP: true,
         email: user.email
@@ -411,7 +399,7 @@ const loginUser = async (req, res) => {
     }
 
     const token = createToken(user._id);
-    
+
     res.json({
       success: true,
       message: "Login successful",
@@ -424,9 +412,9 @@ const loginUser = async (req, res) => {
     });
   } catch (error) {
     console.error('Login error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: "An error occurred during login. Please try again." 
+    res.status(500).json({
+      success: false,
+      message: "An error occurred during login. Please try again."
     });
   }
 };
@@ -437,16 +425,16 @@ const adminLogin = async (req, res) => {
     const { email, password } = req.body;
 
     if (!email || !password) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Email and password are required" 
+      return res.status(400).json({
+        success: false,
+        message: "Email and password are required"
       });
     }
 
     if (email !== 'frdgym@gmail.com') {
-      return res.status(401).json({ 
-        success: false, 
-        message: "Unauthorized email address" 
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized email address"
       });
     }
 
@@ -456,17 +444,17 @@ const adminLogin = async (req, res) => {
     }
 
     const token = jwt.sign(
-      { 
+      {
         email,
         role: 'admin',
         timestamp: Date.now()
-      }, 
+      },
       process.env.JWT_SECRET,
       { expiresIn: '8h' }
     );
-    
-    return res.json({ 
-      success: true, 
+
+    return res.json({
+      success: true,
       token,
       user: { email, role: 'admin' }
     });
@@ -483,66 +471,51 @@ const changeAdminPasswordSendOTP = async (req, res) => {
     const adminEmail = 'frdgym@gmail.com';
     const otpEmail = 'vishesh.singal.contact@gmail.com';
 
-    console.log('Change password OTP request received');
-    console.log('Deployment environment:', process.env.NODE_ENV);
+    console.log('Change password OTP request received, environment:', process.env.NODE_ENV);
 
-    // Verify current password
     const isCurrentPasswordValid = currentPassword === process.env.ADMIN_PASSWORD || currentPassword === 'Admin@123!!';
-    
     if (!isCurrentPasswordValid) {
       console.log('Current password invalid');
-      return res.status(401).json({ 
-        success: false, 
-        message: "Current password is incorrect" 
+      return res.status(401).json({
+        success: false,
+        message: "Current password is incorrect"
       });
     }
 
-    console.log('Current password verified');
-
-    // Find or create admin user for OTP
     let adminUser = await UserModel.findOne({ email: adminEmail });
     if (!adminUser) {
       console.log('Creating new admin user for OTP');
-      adminUser = new UserModel({ 
-        email: adminEmail, 
-        name: "Admin User", 
+      adminUser = new UserModel({
+        email: adminEmail,
+        name: "Admin User",
         password: process.env.ADMIN_PASSWORD || 'Admin@123!!',
         isTemp: false
       });
     }
 
-    // Generate OTP
     const otp = adminUser.generateOTP();
     await adminUser.save();
-    
-    console.log('OTP generated:', otp);
-    console.log('Sending OTP to:', otpEmail);
 
-    // Send OTP to vishesh.singal.contact@gmail.com
+    console.log('Sending OTP to:', otpEmail);
     await sendOTPEmail(otpEmail, otp);
 
-    console.log('OTP sent successfully');
-
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       message: "OTP sent to registered email for password change",
       email: otpEmail
     });
   } catch (error) {
     console.error('Change password OTP error:', error);
-    
     let errorMessage = "An error occurred while sending OTP. Please try again.";
-    
-    if (error.message.includes('platform restriction') || error.message.includes('Unable to connect')) {
-      errorMessage = "Email service is currently unavailable on this platform. Please try again later or contact support.";
-    } else if (error.message.includes('authentication failed')) {
-      errorMessage = "Email configuration error. Please contact administrator.";
+    if (error.message.includes('port blocked')) {
+      errorMessage = "SMTP port blocked by platform. Consider using an email API service.";
+    } else if (error.message.includes('App Password')) {
+      errorMessage = "Email authentication failed. Use a Gmail App Password.";
     } else if (error.message.includes('timeout')) {
-      errorMessage = "OTP sending is taking too long. Please try again.";
+      errorMessage = "Email sending timed out. Check network or platform restrictions.";
     }
-    
-    res.status(500).json({ 
-      success: false, 
+    res.status(500).json({
+      success: false,
       message: errorMessage
     });
   }
@@ -554,22 +527,20 @@ const changeAdminPasswordVerify = async (req, res) => {
     const { currentPassword, newPassword, confirmPassword, otp } = req.body;
     const adminEmail = 'frdgym@gmail.com';
 
-    // Validate inputs
     if (!currentPassword || !newPassword || !confirmPassword || !otp) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "All fields are required" 
+      return res.status(400).json({
+        success: false,
+        message: "All fields are required"
       });
     }
 
     if (newPassword !== confirmPassword) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "New passwords do not match" 
+      return res.status(400).json({
+        success: false,
+        message: "New passwords do not match"
       });
     }
 
-    // Enhanced password validation for admin
     const passwordValidation = validatePassword(newPassword);
     if (!passwordValidation.isValid) {
       let errorMessage = "Password must contain:";
@@ -577,42 +548,39 @@ const changeAdminPasswordVerify = async (req, res) => {
       if (!passwordValidation.hasUpperCase) errorMessage += " one uppercase letter,";
       if (!passwordValidation.hasLowerCase) errorMessage += " one lowercase letter,";
       if (!passwordValidation.hasTwoSpecialChars) errorMessage += " at least two special characters,";
-      
+
       errorMessage = errorMessage.slice(0, -1) + '.';
-      return res.status(400).json({ 
-        success: false, 
+      return res.status(400).json({
+        success: false,
         message: errorMessage
       });
     }
 
-    // Verify current password
     const isCurrentPasswordValid = currentPassword === process.env.ADMIN_PASSWORD || currentPassword === 'Admin@123!!';
     if (!isCurrentPasswordValid) {
-      return res.status(401).json({ 
-        success: false, 
-        message: "Current password is incorrect" 
+      return res.status(401).json({
+        success: false,
+        message: "Current password is incorrect"
       });
     }
 
-    // Find admin user and verify OTP
     const adminUser = await UserModel.findOne({ email: adminEmail });
     if (!adminUser) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "Admin user not found" 
+      return res.status(404).json({
+        success: false,
+        message: "Admin user not found"
       });
     }
 
     const verification = adminUser.verifyOTP(otp);
     if (!verification.isValid) {
-      return res.status(401).json({ 
-        success: false, 
+      return res.status(401).json({
+        success: false,
         message: verification.message || "Invalid or expired OTP",
         isExpired: verification.isExpired
       });
     }
 
-    // Update environment variable and admin user password
     process.env.ADMIN_PASSWORD = newPassword;
     adminUser.password = newPassword;
     await adminUser.save();
@@ -623,9 +591,9 @@ const changeAdminPasswordVerify = async (req, res) => {
     });
   } catch (error) {
     console.error('Change password verification error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: "An error occurred while changing password. Please try again." 
+    res.status(500).json({
+      success: false,
+      message: "An error occurred while changing password. Please try again."
     });
   }
 };
@@ -636,35 +604,35 @@ const forgotPassword = async (req, res) => {
     const { email } = req.body;
 
     if (!validator.isEmail(email)) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Please provide a valid email address" 
+      return res.status(400).json({
+        success: false,
+        message: "Please provide a valid email address"
       });
     }
 
     const user = await UserModel.findOne({ email });
     if (!user) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "No account found with this email." 
+      return res.status(404).json({
+        success: false,
+        message: "No account found with this email."
       });
     }
 
     const otp = user.generateOTP();
     await user.save();
-    
+
     await sendOTPEmail(email, otp);
 
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       message: "Password reset OTP sent successfully. Please check your email.",
       email: email
     });
   } catch (error) {
     console.error('Forgot password error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: "An error occurred. Please try again later." 
+    res.status(500).json({
+      success: false,
+      message: "An error occurred. Please try again later."
     });
   }
 };
@@ -675,34 +643,34 @@ const verifyResetOTP = async (req, res) => {
     const { email, otp } = req.body;
 
     if (!email || !otp) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Email and OTP are required" 
+      return res.status(400).json({
+        success: false,
+        message: "Email and OTP are required"
       });
     }
 
     const user = await UserModel.findOne({ email });
     if (!user) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "No account found with this email." 
+      return res.status(404).json({
+        success: false,
+        message: "No account found with this email."
       });
     }
 
     const verification = user.verifyOTP(otp);
     if (!verification.isValid) {
-      return res.status(401).json({ 
-        success: false, 
+      return res.status(401).json({
+        success: false,
         message: verification.message || "Invalid or expired OTP",
         isExpired: verification.isExpired
       });
     }
 
     const resetToken = jwt.sign(
-      { 
+      {
         id: user._id,
         purpose: 'password_reset'
-      }, 
+      },
       process.env.JWT_SECRET,
       { expiresIn: '15m' }
     );
@@ -717,9 +685,9 @@ const verifyResetOTP = async (req, res) => {
     });
   } catch (error) {
     console.error('OTP verification error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: "An error occurred during verification. Please try again." 
+    res.status(500).json({
+      success: false,
+      message: "An error occurred during verification. Please try again."
     });
   }
 };
@@ -730,20 +698,19 @@ const resetPassword = async (req, res) => {
     const { resetToken, newPassword, confirmPassword } = req.body;
 
     if (!resetToken || !newPassword || !confirmPassword) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "All fields are required" 
+      return res.status(400).json({
+        success: false,
+        message: "All fields are required"
       });
     }
 
     if (newPassword !== confirmPassword) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Passwords do not match" 
+      return res.status(400).json({
+        success: false,
+        message: "Passwords do not match"
       });
     }
 
-    // Enhanced password validation for reset
     const passwordValidation = validatePassword(newPassword);
     if (!passwordValidation.isValid) {
       let errorMessage = "Password must contain:";
@@ -751,27 +718,27 @@ const resetPassword = async (req, res) => {
       if (!passwordValidation.hasUpperCase) errorMessage += " one uppercase letter,";
       if (!passwordValidation.hasLowerCase) errorMessage += " one lowercase letter,";
       if (!passwordValidation.hasTwoSpecialChars) errorMessage += " at least two special characters,";
-      
+
       errorMessage = errorMessage.slice(0, -1) + '.';
-      return res.status(400).json({ 
-        success: false, 
+      return res.status(400).json({
+        success: false,
         message: errorMessage
       });
     }
 
     const decoded = jwt.verify(resetToken, process.env.JWT_SECRET);
     if (decoded.purpose !== 'password_reset') {
-      return res.status(401).json({ 
-        success: false, 
-        message: "Invalid reset token" 
+      return res.status(401).json({
+        success: false,
+        message: "Invalid reset token"
       });
     }
 
     const user = await UserModel.findById(decoded.id);
     if (!user) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "User not found" 
+      return res.status(404).json({
+        success: false,
+        message: "User not found"
       });
     }
 
@@ -784,24 +751,24 @@ const resetPassword = async (req, res) => {
     });
   } catch (error) {
     console.error('Password reset error:', error);
-    
+
     if (error.name === 'TokenExpiredError') {
-      return res.status(401).json({ 
-        success: false, 
-        message: "Reset token has expired. Please request a new one." 
+      return res.status(401).json({
+        success: false,
+        message: "Reset token has expired. Please request a new one."
       });
     }
-    
+
     if (error.name === 'JsonWebTokenError') {
-      return res.status(401).json({ 
-        success: false, 
-        message: "Invalid reset token" 
+      return res.status(401).json({
+        success: false,
+        message: "Invalid reset token"
       });
     }
-    
-    res.status(500).json({ 
-      success: false, 
-      message: "An error occurred while resetting password. Please try again." 
+
+    res.status(500).json({
+      success: false,
+      message: "An error occurred while resetting password. Please try again."
     });
   }
 };
