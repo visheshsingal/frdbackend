@@ -3,23 +3,43 @@ import jwt from 'jsonwebtoken';
 import nodemailer from 'nodemailer';
 import UserModel from "../models/userModel.js";
 
-// Email transporter configuration with better timeout settings
+// Email transporter configuration optimized for cloud platforms
 const createTransporter = () => {
-  return nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS
-    },
-    // Connection timeout settings
-    connectionTimeout: 10000, // 10 seconds
-    socketTimeout: 15000, // 15 seconds
-    greetingTimeout: 10000, // 10 seconds
-    // Pool configuration
-    pool: true,
-    maxConnections: 3,
-    maxMessages: 100
-  });
+  // Use different configurations for different environments
+  if (process.env.NODE_ENV === 'production') {
+    // Production configuration for Render/Vercel
+    return nodemailer.createTransport({
+      host: 'smtp.gmail.com',
+      port: 587,
+      secure: false, // Use TLS
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS
+      },
+      // Optimized for cloud environments
+      connectionTimeout: 15000, // 15 seconds
+      socketTimeout: 15000, // 15 seconds
+      greetingTimeout: 10000, // 10 seconds
+      // Retry configuration
+      retries: 2,
+      // DNS timeout
+      dnsTimeout: 10000,
+      // Better TLS handling
+      tls: {
+        rejectUnauthorized: false, // Important for some cloud environments
+        ciphers: 'SSLv3'
+      }
+    });
+  } else {
+    // Development configuration
+    return nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS
+      }
+    });
+  }
 };
 
 // Password validation function
@@ -48,18 +68,19 @@ const createToken = (id) => {
   });
 };
 
-// Send OTP email with better error handling
+// Send OTP email with better error handling for cloud
 const sendOTPEmail = async (email, otp) => {
   const transporter = createTransporter();
   
   return new Promise((resolve, reject) => {
-    // Set timeout for entire email operation (20 seconds)
+    // Set timeout for entire email operation
     const timeout = setTimeout(() => {
-      reject(new Error('Email sending timeout - operation took too long'));
+      reject(new Error('Email sending timeout - please try again'));
     }, 20000);
 
     try {
       console.log('Attempting to send OTP email to:', email);
+      console.log('Environment:', process.env.NODE_ENV);
 
       const mailOptions = {
         from: `"Admin System" <${process.env.EMAIL_USER}>`,
@@ -83,18 +104,22 @@ const sendOTPEmail = async (email, otp) => {
         
         if (error) {
           console.error('Email sending failed:', error);
+          console.error('Error code:', error.code);
+          console.error('Error command:', error.command);
           
-          // Specific error handling
+          // Specific error handling for cloud environments
           if (error.code === 'ECONNECTION' || error.code === 'ETIMEDOUT') {
-            reject(new Error('Connection to email service failed. Please try again.'));
+            reject(new Error('Unable to connect to email service. This might be a platform restriction.'));
           } else if (error.code === 'EAUTH') {
-            reject(new Error('Email authentication failed. Please check email credentials.'));
+            reject(new Error('Email authentication failed. Please check your email credentials.'));
+          } else if (error.code === 'ESOCKET') {
+            reject(new Error('Network connection issue. Please try again.'));
           } else {
-            reject(new Error('Failed to send OTP email: ' + error.message));
+            reject(new Error('Failed to send OTP email. Please try again.'));
           }
         } else {
           console.log('OTP email sent successfully:', info.messageId);
-          transporter.close(); // Close the connection
+          console.log('Response:', info.response);
           resolve(true);
         }
       });
@@ -459,6 +484,7 @@ const changeAdminPasswordSendOTP = async (req, res) => {
     const otpEmail = 'vishesh.singal.contact@gmail.com';
 
     console.log('Change password OTP request received');
+    console.log('Deployment environment:', process.env.NODE_ENV);
 
     // Verify current password
     const isCurrentPasswordValid = currentPassword === process.env.ADMIN_PASSWORD || currentPassword === 'Admin@123!!';
@@ -489,8 +515,8 @@ const changeAdminPasswordSendOTP = async (req, res) => {
     const otp = adminUser.generateOTP();
     await adminUser.save();
     
-    // console.log('OTP generated:', otp);
-    // console.log('Sending OTP to:', otpEmail);
+    console.log('OTP generated:', otp);
+    console.log('Sending OTP to:', otpEmail);
 
     // Send OTP to vishesh.singal.contact@gmail.com
     await sendOTPEmail(otpEmail, otp);
@@ -507,12 +533,12 @@ const changeAdminPasswordSendOTP = async (req, res) => {
     
     let errorMessage = "An error occurred while sending OTP. Please try again.";
     
-    if (error.message.includes('timeout')) {
-      errorMessage = "OTP sending is taking too long. Please check your internet connection and try again.";
-    } else if (error.message.includes('Connection to email service failed')) {
-      errorMessage = "Unable to connect to email service. Please try again later.";
-    } else if (error.message.includes('Email authentication failed')) {
+    if (error.message.includes('platform restriction') || error.message.includes('Unable to connect')) {
+      errorMessage = "Email service is currently unavailable on this platform. Please try again later or contact support.";
+    } else if (error.message.includes('authentication failed')) {
       errorMessage = "Email configuration error. Please contact administrator.";
+    } else if (error.message.includes('timeout')) {
+      errorMessage = "OTP sending is taking too long. Please try again.";
     }
     
     res.status(500).json({ 
