@@ -20,8 +20,12 @@ const initializeApp = async () => {
     await connectDB();
     await connectCloudinary();
     
-    // Ensure admin user exists
-    await UserModel.ensureAdminExists();
+    // Ensure admin user exists (don't crash app if this fails)
+    try {
+      await UserModel.ensureAdminExists();
+    } catch (adminError) {
+      console.error('Admin seeding failed, but continuing app startup:', adminError.message);
+    }
     
     console.log('Application initialized successfully');
   } catch (error) {

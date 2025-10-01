@@ -80,37 +80,30 @@ userSchema.statics.ensureAdminExists = async function() {
     const adminEmail = 'frdgym@gmail.com';
     const adminPassword = 'Admin@123!!';
     
-    // Check if user with admin email exists
+    // First check if an admin already exists
+    const existingAdmin = await this.findOne({ email: adminEmail, role: 'admin' });
+    
+    if (existingAdmin) {
+      console.log('Admin user already exists');
+      return existingAdmin;
+    }
+    
+    // Check if user with admin email exists but isn't admin
     const existingUser = await this.findOne({ email: adminEmail });
     
     if (existingUser) {
-      // Update user to admin role and reset password to default
-      let updated = false;
-      
-      if (existingUser.role !== 'admin') {
-        existingUser.role = 'admin';
-        updated = true;
-      }
-      
-      if (!existingUser.isVerified) {
-        existingUser.isVerified = true;
-        updated = true;
-      }
-      
-      // Always reset password to ensure it's the default admin password
+      // Update existing user to admin role
+      existingUser.role = 'admin';
       existingUser.password = adminPassword;
-      updated = true;
+      existingUser.isVerified = true;
       
-      if (updated) {
-        await existingUser.save();
-        console.log('Admin user updated with role and password reset');
-      } else {
-        console.log('Admin user already exists and up to date');
-      }
-      
+      await existingUser.save();
+      console.log('Existing user upgraded to admin role');
       return existingUser;
-    } else {
-      // Create new admin user
+    }
+    
+    // Create new admin user only if none exists
+    try {
       const adminUser = new this({
         name: 'FRD Gym Admin',
         email: adminEmail,
@@ -122,9 +115,31 @@ userSchema.statics.ensureAdminExists = async function() {
       await adminUser.save();
       console.log('Admin user created successfully');
       return adminUser;
+    } catch (createError) {
+      // If creation fails due to duplicate key, try to find existing user again
+      if (createError.code === 11000) {
+        console.log('Duplicate key error, checking for existing user again...');
+        const existingUserRetry = await this.findOne({ email: adminEmail });
+        if (existingUserRetry) {
+          if (existingUserRetry.role !== 'admin') {
+            existingUserRetry.role = 'admin';
+            existingUserRetry.password = adminPassword;
+            existingUserRetry.isVerified = true;
+            await existingUserRetry.save();
+            console.log('Updated existing user to admin after duplicate error');
+          }
+          return existingUserRetry;
+        }
+      }
+      throw createError;
     }
   } catch (error) {
     console.error('Error ensuring admin exists:', error);
+    // Don't throw error in production to prevent app crash
+    if (process.env.NODE_ENV === 'production') {
+      console.log('Continuing without admin seeding due to error in production');
+      return null;
+    }
     throw error;
   }
 };
