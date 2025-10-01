@@ -38,13 +38,35 @@ initializeApp();
 
 // Middlewares
 app.use(express.json());
-app.use(cors({
-  origin: [
-    'http://localhost:5174', // Local dev (Vite frontend)
-    'https://frdadmin.vercel.app/' // Replace with your actual Vercel URL after deployment
-  ],
-  credentials: true // Allow cookies/auth headers if needed
-}));
+
+// CORS Configuration
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    const allowedOrigins = [
+      'http://localhost:5173', // Vite dev server default port
+      'http://localhost:5174', // Alternative Vite port
+      'http://localhost:3000', // React dev server
+      'https://frdadmin.vercel.app', // Production Vercel URL
+    ];
+    
+    // Check if origin is in allowed list or is a Vercel preview URL
+    if (allowedOrigins.includes(origin) || origin.includes('vercel.app')) {
+      callback(null, true);
+    } else {
+      console.log('CORS blocked origin:', origin);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'token'],
+  optionsSuccessStatus: 200
+};
+
+app.use(cors(corsOptions));
 
 // API Endpoints
 app.use('/api/user', userRouter);
@@ -56,6 +78,16 @@ app.use('/api/bookings', bookingRouter);
 // Test Route
 app.get('/', (req, res) => {
   res.send('API Working');
+});
+
+// CORS Test Route
+app.get('/api/test', (req, res) => {
+  res.json({
+    success: true,
+    message: 'CORS is working!',
+    origin: req.headers.origin,
+    timestamp: new Date().toISOString()
+  });
 });
 
 // Start Server
