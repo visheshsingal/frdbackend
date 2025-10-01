@@ -483,13 +483,13 @@ const adminLogin = async (req, res) => {
 // Change Admin Password - Send OTP
 const changeAdminPasswordSendOTP = async (req, res) => {
   try {
-    const { currentPassword } = req.body;
+    const { currentPassword, email = 'frdgym@gmail.com' } = req.body;
     const otpEmail = 'vishesh.singal.contact@gmail.com';
 
-    console.log('Change password OTP request received');
+    console.log('Admin change password OTP request');
 
-    // Find admin user from request (set by adminAuth middleware)
-    const adminUser = req.user;
+    // Find admin user
+    const adminUser = await UserModel.findOne({ email: 'frdgym@gmail.com', isAdmin: true });
     if (!adminUser) {
       return res.status(404).json({ 
         success: false, 
@@ -497,7 +497,7 @@ const changeAdminPasswordSendOTP = async (req, res) => {
       });
     }
 
-    // Verify current password against database
+    // Verify current password
     const isCurrentPasswordValid = await adminUser.comparePassword(currentPassword);
     if (!isCurrentPasswordValid) {
       return res.status(401).json({ 
@@ -506,18 +506,14 @@ const changeAdminPasswordSendOTP = async (req, res) => {
       });
     }
 
-    console.log('Current password verified');
-
     // Generate OTP
     const otp = adminUser.generateOTP();
     await adminUser.save();
     
-    console.log('OTP generated:', otp);
+    console.log('OTP generated for admin:', otp);
 
-    // Send OTP
+    // Send OTP - THIS IS THE SAME CODE THAT WORKS FOR USERS
     await sendOTPEmail(otpEmail, otp);
-
-    console.log('OTP sent successfully');
 
     res.json({ 
       success: true, 
@@ -525,10 +521,10 @@ const changeAdminPasswordSendOTP = async (req, res) => {
       email: otpEmail
     });
   } catch (error) {
-    console.error('Change password OTP error:', error);
+    console.error('Admin OTP error:', error);
     res.status(500).json({ 
       success: false, 
-      message: error.message || "An error occurred while sending OTP. Please try again."
+      message: error.message 
     });
   }
 };
@@ -569,8 +565,8 @@ const changeAdminPasswordVerify = async (req, res) => {
       });
     }
 
-    // Find admin user from request
-    const adminUser = req.user;
+    // Find admin user
+    const adminUser = await UserModel.findOne({ email: 'frdgym@gmail.com', isAdmin: true });
     if (!adminUser) {
       return res.status(404).json({ 
         success: false, 
@@ -789,25 +785,6 @@ const resetPassword = async (req, res) => {
   }
 };
 
-// Debug route to check admin user
-const checkAdmin = async (req, res) => {
-  try {
-    const admin = await UserModel.findOne({ email: 'frdgym@gmail.com', isAdmin: true });
-    res.json({ 
-      success: true, 
-      adminExists: !!admin,
-      admin: admin ? {
-        email: admin.email,
-        name: admin.name,
-        isAdmin: admin.isAdmin,
-        role: admin.role
-      } : null
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-}
-
 export {
   loginUser,
   registerUser,
@@ -819,6 +796,5 @@ export {
   resetPassword,
   changeAdminPasswordSendOTP,
   changeAdminPasswordVerify,
-  checkAdmin,
   initializeAdmin
 };

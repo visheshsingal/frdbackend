@@ -9,10 +9,8 @@ import {
   verifyResetOTP,
   resetPassword,
   changeAdminPasswordSendOTP,
-  changeAdminPasswordVerify,
-  checkAdmin
+  changeAdminPasswordVerify
 } from '../controllers/userController.js';
-import adminAuth from '../middleware/adminAuth.js';
 
 const userRouter = express.Router();
 
@@ -24,8 +22,7 @@ userRouter.post('/admin', adminLogin);
 userRouter.post('/forgot-password', forgotPassword);
 userRouter.post('/verify-reset-otp', verifyResetOTP);
 userRouter.post('/reset-password', resetPassword);
-userRouter.post('/admin/change-password/send-otp', adminAuth, changeAdminPasswordSendOTP);
-userRouter.post('/admin/change-password/verify', adminAuth, changeAdminPasswordVerify);
-userRouter.get('/check-admin', checkAdmin);
+userRouter.post('/admin/change-password/send-otp', changeAdminPasswordSendOTP);
+userRouter.post('/admin/change-password/verify', changeAdminPasswordVerify);
 
 export default userRouter;

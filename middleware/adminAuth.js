@@ -4,33 +4,23 @@ import UserModel from "../models/userModel.js";
 const adminAuth = async (req, res, next) => {
   try {
     const { token } = req.headers;
+    
     if (!token) {
-      return res.status(401).json({ success: false, message: "Not Authorized Login Again" });
+      return res.status(401).json({ success: false, message: "Token required" });
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     
-    // Handle different token formats
-    let user;
-    if (decoded.id) {
-      // New format: token has user ID
-      user = await UserModel.findById(decoded.id);
-    } else if (decoded.email) {
-      // Old format: token has only email
-      user = await UserModel.findOne({ email: decoded.email, isAdmin: true });
+    // SIMPLE CHECK: Just verify the token is valid and has admin role
+    if (decoded.role === 'admin' && decoded.email === 'frdgym@gmail.com') {
+      next(); // Allow access
     } else {
-      return res.status(401).json({ success: false, message: "Invalid token format" });
+      return res.status(401).json({ success: false, message: "Admin access required" });
     }
     
-    if (!user || !user.isAdmin || user.email !== 'frdgym@gmail.com') {
-      return res.status(401).json({ success: false, message: "Not Authorized Login Again" });
-    }
-
-    req.user = user;
-    next();
   } catch (error) {
-    console.log('Admin auth error:', error);
-    res.status(401).json({ success: false, message: "Not Authorized Login Again" });
+    console.log('Admin auth error:', error.message);
+    return res.status(401).json({ success: false, message: "Invalid token" });
   }
 }
 
