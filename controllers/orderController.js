@@ -10,17 +10,23 @@ const razorpayInstance = new razorpay({
     key_secret: process.env.RAZORPAY_KEY_SECRET,
 })
 
+// ✅ IMPROVED EMAIL TRANSPORTER WITH BETTER CONFIG
 const transporter = nodemailer.createTransport({
     service: 'gmail',
     auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS
-    }
+    },
+    // ✅ ADD THESE SETTINGS FOR BETTER RELIABILITY
+    pool: true,
+    maxConnections: 1,
+    maxMessages: 5,
+    rateDelta: 1000,
+    rateLimit: 5
 })
 
 // COMMON ORDER CREATION FUNCTION
 const createOrder = async (orderData) => {
-    // Validate items
     if (!orderData.items || orderData.items.length === 0) {
         throw new Error("Cannot place order with empty cart");
     }
@@ -35,7 +41,6 @@ const placeOrder = async (req, res) => {
     try {
         const { userId, items, amount, address } = req.body;
 
-        // Validate required fields
         if (!items || items.length === 0) {
             return res.json({ 
                 success: false, 
@@ -56,7 +61,7 @@ const placeOrder = async (req, res) => {
             address,
             amount,
             paymentMethod: "COD",
-            payment: false,
+            payment: false, // COD starts as unpaid
             date: Date.now(),
             status: 'Order Placed'
         }
@@ -92,15 +97,16 @@ const placeOrderStripe = async (req, res) => {
             });
         }
 
+        // Create temporary order with pending payment
         const orderData = {
             userId,
             items,
             address,
             amount,
             paymentMethod: "Stripe",
-            payment: false,
+            payment: false, // Initially false
             date: Date.now(),
-            status: 'Order Placed'
+            status: 'Payment Pending'
         }
 
         const newOrder = await createOrder(orderData);
@@ -117,14 +123,13 @@ const placeOrderStripe = async (req, res) => {
             quantity: item.quantity
         }))
 
-        // Add delivery charge
         line_items.push({
             price_data: {
                 currency: 'inr',
                 product_data: {
                     name: 'Delivery Charges'
                 },
-                unit_amount: 10 * 100 // ₹10 delivery
+                unit_amount: 10 * 100
             },
             quantity: 1
         })
@@ -151,6 +156,45 @@ const placeOrderStripe = async (req, res) => {
     }
 }
 
+// Verify Stripe - ONLY SUCCESSFUL PAYMENTS CREATE ORDERS
+const verifyStripe = async (req, res) => {
+    const { orderId, success, userId } = req.body;
+
+    try {
+        if (success === "true") {
+            // Payment successful - update order to paid
+            await orderModel.findByIdAndUpdate(orderId, { 
+                payment: true,
+                status: 'Order Placed'
+            });
+            await userModel.findByIdAndUpdate(userId, { cartData: {} });
+            res.json({ 
+                success: true, 
+                message: "Payment Successful! Your order has been confirmed." 
+            });
+        } else {
+            // Payment failed - delete the temporary order
+            await orderModel.findByIdAndDelete(orderId);
+            res.json({ 
+                success: false, 
+                message: "Payment failed. Order cancelled." 
+            });
+        }
+    } catch (error) {
+        console.log('Stripe Verify Error:', error);
+        // Error case - delete the order
+        try {
+            await orderModel.findByIdAndDelete(orderId);
+        } catch (deleteError) {
+            console.log('Delete order error:', deleteError);
+        }
+        res.json({ 
+            success: false, 
+            message: error.message 
+        });
+    }
+}
+
 // Placing orders using Razorpay Method
 const placeOrderRazorpay = async (req, res) => {
     try {
@@ -163,15 +207,16 @@ const placeOrderRazorpay = async (req, res) => {
             });
         }
 
+        // Create temporary order with pending payment
         const orderData = {
             userId,
             items,
             address,
             amount,
             paymentMethod: "Razorpay",
-            payment: false,
+            payment: false, // Initially false
             date: Date.now(),
-            status: 'Order Placed'
+            status: 'Payment Pending'
         }
 
         const newOrder = await createOrder(orderData);
@@ -199,58 +244,44 @@ const placeOrderRazorpay = async (req, res) => {
     }
 }
 
-// Verify Stripe 
-const verifyStripe = async (req, res) => {
-    const { orderId, success, userId } = req.body;
-
-    try {
-        if (success === "true") {
-            await orderModel.findByIdAndUpdate(orderId, { payment: true });
-            await userModel.findByIdAndUpdate(userId, { cartData: {} });
-            res.json({ 
-                success: true, 
-                message: "Payment Successful! Your order has been confirmed." 
-            });
-        } else {
-            await orderModel.findByIdAndDelete(orderId);
-            res.json({ 
-                success: false, 
-                message: "Payment failed. Please try again." 
-            });
-        }
-    } catch (error) {
-        console.log('Stripe Verify Error:', error);
-        res.json({ 
-            success: false, 
-            message: error.message 
-        });
-    }
-}
-
-// Verify Razorpay
+// Verify Razorpay - ONLY SUCCESSFUL PAYMENTS CONFIRM ORDERS
 const verifyRazorpay = async (req, res) => {
     try {
         const { userId, razorpay_order_id } = req.body;
 
         const orderInfo = await razorpayInstance.orders.fetch(razorpay_order_id);
+        
         if (orderInfo.status === 'paid') {
-            await orderModel.findByIdAndUpdate(orderInfo.receipt, { payment: true });
+            // Payment successful - update order to paid and confirmed
+            await orderModel.findByIdAndUpdate(orderInfo.receipt, { 
+                payment: true,
+                status: 'Order Placed'
+            });
             await userModel.findByIdAndUpdate(userId, { cartData: {} });
+            
             res.json({ 
                 success: true, 
                 message: "Payment Successful! Your order has been confirmed." 
             });
         } else {
+            // Payment failed - delete the temporary order
+            await orderModel.findByIdAndDelete(orderInfo.receipt);
             res.json({ 
                 success: false, 
-                message: 'Payment Failed. Please try again.' 
+                message: 'Payment Failed. Order cancelled.' 
             });
         }
     } catch (error) {
         console.log('Razorpay Verify Error:', error);
+        // Error case - delete the order
+        try {
+            await orderModel.findByIdAndDelete(orderInfo.receipt);
+        } catch (deleteError) {
+            console.log('Delete order error:', deleteError);
+        }
         res.json({ 
             success: false, 
-            message: error.message 
+            message: 'Payment verification failed. Order cancelled.' 
         });
     }
 }
@@ -301,7 +332,7 @@ const userOrders = async (req, res) => {
     }
 }
 
-// Update order status from Admin Panel
+// Update order status from Admin Panel - DELIVERED = AUTOMATIC PAID
 const updateStatus = async (req, res) => {
     try {
         const { orderId, status } = req.body;
@@ -313,7 +344,15 @@ const updateStatus = async (req, res) => {
             });
         }
 
-        await orderModel.findByIdAndUpdate(orderId, { status });
+        const updateData = { status };
+        
+        // If status is 'Delivered', automatically mark as paid
+        if (status === 'Delivered') {
+            updateData.payment = true;
+        }
+
+        await orderModel.findByIdAndUpdate(orderId, updateData);
+        
         res.json({ 
             success: true, 
             message: `Order status updated to ${status}` 
@@ -328,66 +367,132 @@ const updateStatus = async (req, res) => {
     }
 }
 
-// Cancel order and send email notification
+// ✅ IMPROVED CANCEL ORDER WITH BETTER EMAIL HANDLING
 const cancelOrder = async (req, res) => {
     try {
         const { orderId, userEmail } = req.body;
 
+        console.log('🔍 Cancel Order Request Received:', { orderId, userEmail });
+
+        // Find the order
         const order = await orderModel.findById(orderId);
         if (!order) {
+            console.log('❌ Order not found:', orderId);
             return res.status(404).json({ 
                 success: false, 
                 message: 'Order not found' 
             });
         }
 
+        // Check if order is already cancelled
         if (order.status === 'Cancelled') {
+            console.log('⚠️ Order already cancelled:', orderId);
             return res.status(400).json({ 
                 success: false, 
                 message: 'Order is already cancelled' 
             });
         }
 
+        // Check if order is already delivered
         if (order.status === 'Delivered') {
+            console.log('❌ Cannot cancel delivered order:', orderId);
             return res.status(400).json({ 
                 success: false, 
                 message: 'Delivered orders cannot be cancelled' 
             });
         }
 
+        // Update order status
         order.status = 'Cancelled';
         await order.save();
 
-        // Send cancellation email
-        const mailOptions = {
-            from: process.env.EMAIL_USER,
-            to: userEmail || order.address.email,
-            subject: `Order #${order._id} Cancelled`,
-            html: `
-                <h2>Order Cancellation Confirmation</h2>
-                <p>Your order #${order._id} has been cancelled.</p>
-                <p><strong>Order Details:</strong></p>
-                <ul>
-                    ${order.items.map(item => `
-                        <li>${item.name} x ${item.quantity} - ₹${item.price}</li>
-                    `).join('')}
-                </ul>
-                <p>Total Amount: ₹${order.amount}</p>
-                <p>Contact: +91 9278160000</p>
-            `
-        };
+        console.log('✅ Order cancelled in database:', orderId);
 
-        await transporter.sendMail(mailOptions);
+        // ✅ IMPROVED EMAIL SENDING WITH PROPER ERROR HANDLING
+        let emailSent = false;
+        let emailError = null;
+
+        try {
+            const targetEmail = userEmail || order.address.email;
+            console.log('📧 Attempting to send cancellation email to:', targetEmail);
+
+            const mailOptions = {
+                from: `"Fitness Store" <${process.env.EMAIL_USER}>`,
+                to: targetEmail,
+                subject: `Order #${order._id} Cancellation Confirmation`,
+                html: `
+                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 10px;">
+                        <div style="text-align: center; background: #052659; color: white; padding: 15px; border-radius: 10px 10px 0 0;">
+                            <h2 style="margin: 0;">Order Cancellation Confirmation</h2>
+                        </div>
+                        <div style="padding: 20px;">
+                            <p>Dear ${order.address.firstName} ${order.address.lastName},</p>
+                            <p>Your order <strong>#${order._id}</strong> has been successfully cancelled.</p>
+                            
+                            <div style="background: #f9f9f9; padding: 15px; border-radius: 5px; margin: 15px 0;">
+                                <h3 style="color: #052659; margin-top: 0;">Order Details:</h3>
+                                <ul style="list-style: none; padding: 0;">
+                                    ${order.items.map(item => `
+                                        <li style="padding: 5px 0; border-bottom: 1px solid #eee;">
+                                            <strong>${item.name}</strong> 
+                                            <br>Quantity: ${item.quantity} 
+                                            | Price: ₹${item.price}
+                                            ${item.size ? ` | Size: ${item.size}` : ''}
+                                        </li>
+                                    `).join('')}
+                                </ul>
+                                <div style="margin-top: 10px; padding-top: 10px; border-top: 2px solid #052659;">
+                                    <strong>Total Amount: ₹${order.amount}</strong>
+                                </div>
+                            </div>
+
+                            <p>If you have any questions or need assistance, please don't hesitate to contact us:</p>
+                            <div style="background: #e8f4fd; padding: 15px; border-radius: 5px; margin: 15px 0;">
+                                <p style="margin: 5px 0;">📞 Phone: +91 9278160000</p>
+                                <p style="margin: 5px 0;">✉️ Email: ${process.env.EMAIL_USER}</p>
+                            </div>
+
+                            <p>Thank you for shopping with us. We hope to serve you better in the future.</p>
+                            
+                            <div style="text-align: center; margin-top: 20px; padding-top: 20px; border-top: 1px solid #e0e0e0;">
+                                <p style="color: #666; font-size: 12px;">
+                                    This is an automated message. Please do not reply to this email.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                `
+            };
+
+            // ✅ ADD TIMEOUT TO EMAIL SENDING
+            const emailPromise = transporter.sendMail(mailOptions);
+            const timeoutPromise = new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('Email timeout')), 10000)
+            );
+
+            await Promise.race([emailPromise, timeoutPromise]);
+            
+            emailSent = true;
+            console.log('✅ Cancellation email sent successfully to:', targetEmail);
+
+        } catch (emailError) {
+            console.log('⚠️ Email sending failed, but order was cancelled:', emailError.message);
+            emailError = emailError.message;
+            // Don't throw error - order is still cancelled successfully
+        }
 
         res.json({ 
             success: true, 
-            message: 'Order cancelled successfully' 
+            message: 'Order cancelled successfully' + (emailSent ? ' and email sent' : ' (email failed)'),
+            emailSent: emailSent,
+            emailError: emailError
         });
+
     } catch (error) {
-        console.error('Cancel Order Error:', error);
+        console.error('💥 Cancel Order Error:', error);
         res.status(500).json({ 
             success: false, 
-            message: 'Error cancelling order' 
+            message: 'Error cancelling order: ' + error.message 
         });
     }
 }
