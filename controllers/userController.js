@@ -72,10 +72,10 @@ const createToken = (id) => {
 // Initialize Admin User
 const initializeAdmin = async () => {
   try {
-    const adminExists = await UserModel.findOne({ email: 'frdgym@gmail.com', isAdmin: true });
+    const adminExists = await UserModel.findOne({ email: 'vishesh.singal.contact@gmail.com', isAdmin: true });
     if (!adminExists) {
       const adminUser = new UserModel({
-        email: 'frdgym@gmail.com',
+        email: 'vishesh.singal.contact@gmail.com',
         password: process.env.INITIAL_ADMIN_PASSWORD || 'Admin@123!!',
         name: 'Admin User',
         role: 'admin',
@@ -83,7 +83,7 @@ const initializeAdmin = async () => {
         isVerified: true
       });
       await adminUser.save();
-      console.log('Admin user created successfully');
+      console.log('Admin user created successfully with email: vishesh.singal.contact@gmail.com');
     } else {
       console.log('Admin user already exists');
     }
@@ -453,7 +453,7 @@ const adminLogin = async (req, res) => {
     }
 
     // Find admin user in database
-    const adminUser = await UserModel.findOne({ email: 'frdgym@gmail.com', isAdmin: true });
+    const adminUser = await UserModel.findOne({ email: 'vishesh.singal.contact@gmail.com', isAdmin: true });
     if (!adminUser) {
       return res.status(401).json({ 
         success: false, 
@@ -500,12 +500,13 @@ const changeAdminPasswordSendOTP = async (req, res) => {
   try {
     console.log('=== ADMIN OTP REQUEST START ===');
     const { currentPassword } = req.body;
-    const otpEmail = 'vishesh.singal.contact@gmail.com';
+    const otpEmail = 'vishesh.singal.contact@gmail.com'; // Same as admin email
 
     console.log('1. Request received with currentPassword:', !!currentPassword);
+    console.log('1.5. OTP will be sent to:', otpEmail);
 
     // Find admin user
-    const adminUser = await UserModel.findOne({ email: 'frdgym@gmail.com', isAdmin: true });
+    const adminUser = await UserModel.findOne({ email: 'vishesh.singal.contact@gmail.com', isAdmin: true });
     console.log('2. Admin user found:', !!adminUser);
     
     if (!adminUser) {
@@ -598,7 +599,7 @@ const changeAdminPasswordVerify = async (req, res) => {
     }
 
     // Find admin user
-    const adminUser = await UserModel.findOne({ email: 'frdgym@gmail.com', isAdmin: true });
+    const adminUser = await UserModel.findOne({ email: 'vishesh.singal.contact@gmail.com', isAdmin: true });
     if (!adminUser) {
       return res.status(404).json({ 
         success: false, 

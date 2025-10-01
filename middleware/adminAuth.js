@@ -12,7 +12,7 @@ const adminAuth = async (req, res, next) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     
     // SIMPLE CHECK: Just verify the token is valid and has admin role
-    if (decoded.role === 'admin' && decoded.email === 'frdgym@gmail.com') {
+    if (decoded.role === 'admin' && decoded.email === 'vishesh.singal.contact@gmail.com') {
       next(); // Allow access
     } else {
       return res.status(401).json({ success: false, message: "Admin access required" });
