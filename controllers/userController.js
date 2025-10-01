@@ -1,10 +1,6 @@
 import validator from "validator";
 import jwt from 'jsonwebtoken';
 import UserModel from "../models/userModel.js";
-import sgMail from '@sendgrid/mail';
-
-// Initialize SendGrid
-sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
 // Password validation function
 const validatePassword = (password) => {
@@ -24,67 +20,38 @@ const validatePassword = (password) => {
   };
 };
 
-// Helper: Send OTP Email using SendGrid (SPAM-FIXED VERSION)
-const sendOTPEmail = async (email, otp, purpose = 'verification') => {
-  const subject = 'Your FRD Gym Security Code';
-  
-  const htmlContent = `
-    <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto;">
-      <div style="text-align: center; padding: 20px; background: #052659; color: white;">
-        <h2>FRD Gym</h2>
-      </div>
-      <div style="padding: 20px; background: #f9f9f9;">
-        <p>Hello,</p>
-        <p>Your security code for FRD Gym is:</p>
-        <div style="text-align: center; margin: 30px 0;">
-          <div style="font-size: 32px; font-weight: bold; letter-spacing: 5px; color: #052659; padding: 15px; background: white; border-radius: 5px; display: inline-block;">
-            ${otp}
-          </div>
-        </div>
-        <p>This code will expire in 10 minutes.</p>
-        <p>If you didn't request this code, please ignore this email.</p>
-      </div>
-      <div style="text-align: center; padding: 20px; background: #eee; font-size: 12px; color: #666;">
-        <p>FRD Gym Admin Panel</p>
-      </div>
-    </div>
-  `;
+// Helper: Create JWT token
+const createToken = (id) => {
+  return jwt.sign({ id }, process.env.JWT_SECRET, { 
+    expiresIn: '1d',
+    algorithm: 'HS256'
+  });
+};
 
-  const textContent = `
-FRD Gym Security Code
-
-Your security code is: ${otp}
-
-This code will expire in 10 minutes.
-
-If you didn't request this code, please ignore this email.
-
-FRD Gym Admin Panel
-  `;
-
-  const msg = {
-    to: email,
-    from: {
-      email: process.env.SENDGRID_FROM_EMAIL,
-      name: 'FRD Gym'
-    },
-    subject: subject,
-    html: htmlContent,
-    text: textContent,
-  };
-
+// Initialize Admin User (Run this once to create admin user)
+const initializeAdmin = async () => {
   try {
-    await sgMail.send(msg);
-    console.log(`OTP sent to ${email}`);
-    return { success: true };
+    const adminEmail = 'frdgym@gmail.com';
+    const adminExists = await UserModel.findOne({ email: adminEmail, role: 'admin' });
+    
+    if (!adminExists) {
+      const adminUser = new UserModel({
+        name: 'FRD Admin',
+        email: adminEmail,
+        password: process.env.ADMIN_PASSWORD || 'Admin@123!!',
+        role: 'admin',
+        isVerified: true
+      });
+      await adminUser.save();
+      console.log('Admin user created successfully');
+    }
   } catch (error) {
-    console.error('SendGrid error:', error);
-    return { success: false, error: error.message };
+    console.error('Error initializing admin:', error);
   }
 };
 
-// Store admin password in memory
-let adminPassword = process.env.ADMIN_PASSWORD || 'Admin@123!!';
+// Call this function when server starts
+initializeAdmin();
 
 // Registration
 const registerUser = async (req, res) => {
@@ -105,6 +72,7 @@ const registerUser = async (req, res) => {
       });
     }
 
+    // Enhanced password validation
     const passwordValidation = validatePassword(password);
     if (!passwordValidation.isValid) {
       let errorMessage = "Password must contain:";
@@ -133,15 +101,13 @@ const registerUser = async (req, res) => {
       name, 
       email, 
       password,
-      isVerified: true
+      isVerified: true,
+      role: 'user'
     });
 
     await newUser.save();
 
-    const token = jwt.sign({ id: newUser._id }, process.env.JWT_SECRET, { 
-      expiresIn: '1d',
-      algorithm: 'HS256'
-    });
+    const token = createToken(newUser._id);
     
     res.status(201).json({
       success: true,
@@ -150,7 +116,8 @@ const registerUser = async (req, res) => {
       user: {
         name: newUser.name,
         email: newUser.email,
-        isVerified: newUser.isVerified
+        isVerified: newUser.isVerified,
+        role: newUser.role
       }
     });
   } catch (error) {
@@ -190,10 +157,7 @@ const loginUser = async (req, res) => {
       });
     }
 
-    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { 
-      expiresIn: '1d',
-      algorithm: 'HS256'
-    });
+    const token = createToken(user._id);
     
     res.json({
       success: true,
@@ -202,7 +166,8 @@ const loginUser = async (req, res) => {
       user: {
         name: user.name,
         email: user.email,
-        isVerified: user.isVerified
+        isVerified: user.isVerified,
+        role: user.role
       }
     });
   } catch (error) {
@@ -214,7 +179,7 @@ const loginUser = async (req, res) => {
   }
 };
 
-// Admin Login - Fixed Email Version
+// Admin Login
 const adminLogin = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -226,16 +191,18 @@ const adminLogin = async (req, res) => {
       });
     }
 
-    // Fixed admin email
-    if (email !== 'vishesh.singal.contact@gmail.com') {
+    // Find admin user in database
+    const adminUser = await UserModel.findOne({ email, role: 'admin' });
+    
+    if (!adminUser) {
       return res.status(401).json({ 
         success: false, 
-        message: "Unauthorized admin access" 
+        message: "Admin account not found" 
       });
     }
 
-    // Check against stored admin password
-    const isPasswordValid = password === adminPassword;
+    // Verify password using bcrypt
+    const isPasswordValid = await adminUser.comparePassword(password);
     if (!isPasswordValid) {
       return res.status(401).json({ 
         success: false, 
@@ -245,8 +212,10 @@ const adminLogin = async (req, res) => {
 
     const token = jwt.sign(
       { 
-        email: 'vishesh.singal.contact@gmail.com',
-        role: 'admin'
+        id: adminUser._id,
+        email: adminUser.email,
+        role: 'admin',
+        timestamp: Date.now()
       }, 
       process.env.JWT_SECRET,
       { expiresIn: '8h' }
@@ -256,8 +225,9 @@ const adminLogin = async (req, res) => {
       success: true, 
       token,
       user: { 
-        email: 'vishesh.singal.contact@gmail.com', 
-        role: 'admin'
+        email: adminUser.email, 
+        role: 'admin',
+        name: adminUser.name
       }
     });
   } catch (error) {
@@ -266,74 +236,17 @@ const adminLogin = async (req, res) => {
   }
 };
 
-// Send OTP for Admin Password Change
-const sendAdminPasswordChangeOTP = async (req, res) => {
+// Change Admin Password
+const changeAdminPassword = async (req, res) => {
   try {
-    const { currentPassword } = req.body;
+    const { currentPassword, newPassword, confirmPassword } = req.body;
+    const email = req.user.email;
 
-    if (!currentPassword) {
+    // Validate inputs
+    if (!currentPassword || !newPassword || !confirmPassword) {
       return res.status(400).json({ 
         success: false, 
-        message: "Current password is required" 
-      });
-    }
-
-    // Verify current password
-    const isCurrentPasswordValid = currentPassword === adminPassword;
-    if (!isCurrentPasswordValid) {
-      return res.status(401).json({ 
-        success: false, 
-        message: "Current password is incorrect" 
-      });
-    }
-
-    // Generate OTP
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    
-    // Send OTP via SendGrid
-    const emailResult = await sendOTPEmail(
-      'vishesh.singal.contact@gmail.com', 
-      otp, 
-      'password_change'
-    );
-
-    if (!emailResult.success) {
-      return res.status(500).json({ 
-        success: false, 
-        message: "Failed to send OTP email. Please try again." 
-      });
-    }
-
-    res.json({
-      success: true,
-      message: `OTP sent to vishesh.singal.contact@gmail.com`,
-      email: 'vishesh.singal.contact@gmail.com'
-    });
-  } catch (error) {
-    console.error('Send OTP error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: "An error occurred while sending OTP. Please try again." 
-    });
-  }
-};
-
-// Verify OTP and Change Admin Password
-const verifyOTPAndChangeAdminCredentials = async (req, res) => {
-  try {
-    const { currentPassword, newPassword, confirmPassword, otp } = req.body;
-
-    if (!otp) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Please enter OTP" 
-      });
-    }
-
-    if (!newPassword || !confirmPassword) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Please enter new password and confirmation" 
+        message: "Current password, new password, and confirmation are required" 
       });
     }
 
@@ -344,7 +257,7 @@ const verifyOTPAndChangeAdminCredentials = async (req, res) => {
       });
     }
 
-    // Enhanced password validation
+    // Enhanced password validation for admin
     const passwordValidation = validatePassword(newPassword);
     if (!passwordValidation.isValid) {
       let errorMessage = "Password must contain:";
@@ -360,8 +273,17 @@ const verifyOTPAndChangeAdminCredentials = async (req, res) => {
       });
     }
 
-    // Verify current password again for security
-    const isCurrentPasswordValid = currentPassword === adminPassword;
+    // Find admin user
+    const adminUser = await UserModel.findOne({ email, role: 'admin' });
+    if (!adminUser) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "Admin account not found" 
+      });
+    }
+
+    // Verify current password using bcrypt
+    const isCurrentPasswordValid = await adminUser.comparePassword(currentPassword);
     if (!isCurrentPasswordValid) {
       return res.status(401).json({ 
         success: false, 
@@ -369,18 +291,19 @@ const verifyOTPAndChangeAdminCredentials = async (req, res) => {
       });
     }
 
-    // Update admin password
-    adminPassword = newPassword;
+    // Update password in database
+    adminUser.password = newPassword;
+    await adminUser.save();
 
     res.json({
       success: true,
       message: "Admin password changed successfully"
     });
   } catch (error) {
-    console.error('Change credentials error:', error);
+    console.error('Change password error:', error);
     res.status(500).json({ 
       success: false, 
-      message: "An error occurred while updating credentials. Please try again." 
+      message: "An error occurred while changing password. Please try again." 
     });
   }
 };
@@ -405,7 +328,6 @@ const forgotPassword = async (req, res) => {
       });
     }
 
-    // Generate reset token (valid for 15 minutes)
     const resetToken = jwt.sign(
       { 
         id: user._id,
@@ -449,7 +371,6 @@ const resetPassword = async (req, res) => {
       });
     }
 
-    // Enhanced password validation for reset
     const passwordValidation = validatePassword(newPassword);
     if (!passwordValidation.isValid) {
       let errorMessage = "Password must contain:";
@@ -518,6 +439,5 @@ export {
   adminLogin,
   forgotPassword,
   resetPassword,
-  sendAdminPasswordChangeOTP,
-  verifyOTPAndChangeAdminCredentials
+  changeAdminPassword
 };

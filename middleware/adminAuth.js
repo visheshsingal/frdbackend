@@ -1,24 +1,55 @@
-import jwt from 'jsonwebtoken'
+import jwt from 'jsonwebtoken';
 
 const adminAuth = async (req, res, next) => {
-    try {
-        const token = req.headers.token
-        if (!token) {
-            return res.status(401).json({ success: false, message: "Not Authorized Login Again" })
-        }
-        
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        
-        // Check if it's an admin token
-        if (!decoded || decoded.role !== 'admin') {
-            return res.status(401).json({ success: false, message: "Not Authorized Login Again" })
-        }
-        
-        next()
-    } catch (error) {
-        console.log(error)
-        res.status(401).json({ success: false, message: "Not Authorized Login Again" })
+  try {
+    const token = req.header('Authorization')?.replace('Bearer ', '');
+    
+    console.log('Token received:', token); // DEBUG
+    
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: 'No token provided, authorization denied'
+      });
     }
-}
 
-export default adminAuth
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    
+    console.log('Decoded token:', decoded); // DEBUG
+    
+    // Check if user is admin
+    if (decoded.role !== 'admin') {
+      console.log('Role check failed. Role is:', decoded.role); // DEBUG
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied. Admin privileges required.'
+      });
+    }
+
+    req.user = decoded;
+    next();
+  } catch (error) {
+    console.error('Auth middleware error:', error);
+    
+    if (error.name === 'JsonWebTokenError') {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid token'
+      });
+    }
+    
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({
+        success: false,
+        message: 'Token expired'
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'Server error in authentication'
+    });
+  }
+};
+
+export default adminAuth;

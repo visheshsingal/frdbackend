@@ -5,8 +5,7 @@ import {
   adminLogin,
   forgotPassword,
   resetPassword,
-  sendAdminPasswordChangeOTP,
-  verifyOTPAndChangeAdminCredentials
+  changeAdminPassword
 } from '../controllers/userController.js';
 import adminAuth from '../middleware/adminAuth.js';
 
@@ -19,8 +18,7 @@ userRouter.post('/admin', adminLogin);
 userRouter.post('/forgot-password', forgotPassword);
 userRouter.post('/reset-password', resetPassword);
 
-// Protected admin routes for password change with OTP
-userRouter.post('/admin/change-password/send-otp', adminAuth, sendAdminPasswordChangeOTP);
-userRouter.post('/admin/change-password/verify', adminAuth, verifyOTPAndChangeAdminCredentials);
+// Protected admin routes
+userRouter.post('/admin/change-password', adminAuth, changeAdminPassword);
 
 export default userRouter;
