@@ -6,24 +6,34 @@ import UserModel from "../models/userModel.js";
 // Email transporter configuration
 const createTransporter = () => {
   console.log('Creating email transporter for:', process.env.NODE_ENV);
+  console.log('Email user:', process.env.EMAIL_USER ? 'Set' : 'Not set');
   
+  // Common configuration for both environments
+  const baseConfig = {
+    host: 'smtp.gmail.com',
+    port: 587,
+    secure: false,
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS
+    },
+    tls: {
+      rejectUnauthorized: false
+    }
+  };
+
+  // Production-specific settings with better timeout handling
   if (process.env.NODE_ENV === 'production') {
     return nodemailer.createTransport({
-      host: 'smtp.gmail.com',
-      port: 587,
-      secure: false,
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS
-      },
-      connectionTimeout: 15000,
-      socketTimeout: 15000,
+      ...baseConfig,
+      connectionTimeout: 30000, // Increased to 30 seconds
+      socketTimeout: 30000,     // Increased to 30 seconds
       greetingTimeout: 10000,
-      tls: {
-        rejectUnauthorized: false
-      }
+      logger: true,
+      debug: true // Enable debug logs
     });
   } else {
+    // Development - use service for simplicity
     return nodemailer.createTransport({
       service: 'gmail',
       auth: {
@@ -89,6 +99,10 @@ const sendOTPEmail = async (email, otp) => {
   try {
     const transporter = createTransporter();
     
+    // Verify connection configuration first
+    await transporter.verify();
+    console.log('SEND OTP EMAIL: SMTP connection verified');
+
     const mailOptions = {
       from: `"Admin System" <${process.env.EMAIL_USER}>`,
       to: email,
@@ -108,12 +122,23 @@ const sendOTPEmail = async (email, otp) => {
 
     console.log('SEND OTP EMAIL: Sending email...');
     const info = await transporter.sendMail(mailOptions);
-    console.log('SEND OTP EMAIL: Email sent successfully');
+    console.log('SEND OTP EMAIL: Email sent successfully', info.messageId);
     return true;
 
   } catch (error) {
-    console.error('SEND OTP EMAIL ERROR:', error);
-    throw new Error('Failed to send OTP email: ' + error.message);
+    console.error('SEND OTP EMAIL ERROR DETAILS:');
+    console.error('Error message:', error.message);
+    console.error('Error code:', error.code);
+    console.error('Command:', error.command);
+    
+    // More specific error messages
+    if (error.code === 'EAUTH') {
+      throw new Error('Email authentication failed. Check EMAIL_USER and EMAIL_PASS environment variables.');
+    } else if (error.code === 'ECONNECTION' || error.code === 'ETIMEDOUT') {
+      throw new Error('Cannot connect to email server. Check network connectivity and SMTP settings.');
+    } else {
+      throw new Error('Failed to send OTP email: ' + error.message);
+    }
   }
 };
 
