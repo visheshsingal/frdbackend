@@ -197,19 +197,11 @@ const adminLogin = async (req, res) => {
     if (!adminUser) {
       return res.status(401).json({ 
         success: false, 
-<<<<<<< Updated upstream
         message: "Admin account not found" 
       });
     }
 
     // Verify password using bcrypt
-=======
-        message: "Invalid admin credentials" 
-      });
-    }
-
-    // Verify password
->>>>>>> Stashed changes
     const isPasswordValid = await adminUser.comparePassword(password);
     if (!isPasswordValid) {
       return res.status(401).json({ 
@@ -233,21 +225,86 @@ const adminLogin = async (req, res) => {
       success: true, 
       token,
       user: { 
-<<<<<<< Updated upstream
         email: adminUser.email, 
         role: 'admin',
         name: adminUser.name
-=======
-        id: adminUser._id,
-        name: adminUser.name,
-        email: adminUser.email, 
-        role: 'admin' 
->>>>>>> Stashed changes
       }
     });
   } catch (error) {
     console.error('Admin login error:', error);
     res.status(500).json({ success: false, message: 'An error occurred during login' });
+  }
+};
+
+// Change Admin Password
+const changeAdminPassword = async (req, res) => {
+  try {
+    const { currentPassword, newPassword, confirmPassword } = req.body;
+    const email = req.user.email;
+
+    // Validate inputs
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Current password, new password, and confirmation are required" 
+      });
+    }
+
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "New passwords do not match" 
+      });
+    }
+
+    // Enhanced password validation for admin
+    const passwordValidation = validatePassword(newPassword);
+    if (!passwordValidation.isValid) {
+      let errorMessage = "Password must contain:";
+      if (!passwordValidation.minLength) errorMessage += " at least 8 characters,";
+      if (!passwordValidation.hasUpperCase) errorMessage += " one uppercase letter,";
+      if (!passwordValidation.hasLowerCase) errorMessage += " one lowercase letter,";
+      if (!passwordValidation.hasTwoSpecialChars) errorMessage += " at least two special characters,";
+      
+      errorMessage = errorMessage.slice(0, -1) + '.';
+      return res.status(400).json({ 
+        success: false, 
+        message: errorMessage
+      });
+    }
+
+    // Find admin user
+    const adminUser = await UserModel.findOne({ email, role: 'admin' });
+    if (!adminUser) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "Admin account not found" 
+      });
+    }
+
+    // Verify current password using bcrypt
+    const isCurrentPasswordValid = await adminUser.comparePassword(currentPassword);
+    if (!isCurrentPasswordValid) {
+      return res.status(401).json({ 
+        success: false, 
+        message: "Current password is incorrect" 
+      });
+    }
+
+    // Update password in database
+    adminUser.password = newPassword;
+    await adminUser.save();
+
+    res.json({
+      success: true,
+      message: "Admin password changed successfully"
+    });
+  } catch (error) {
+    console.error('Change password error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: "An error occurred while changing password. Please try again." 
+    });
   }
 };
 
@@ -353,84 +410,6 @@ const changeAdminCredentials = async (req, res) => {
     res.status(500).json({ 
       success: false, 
       message: "An error occurred while updating credentials. Please try again." 
-    });
-  }
-};
-
-// Legacy function for backward compatibility
-const changeAdminPassword = async (req, res) => {
-  try {
-    const { currentPassword, newPassword, confirmPassword } = req.body;
-    const email = req.user.email;
-
-    // Validate inputs
-    if (!currentPassword || !newPassword || !confirmPassword) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Current password, new password, and confirmation are required" 
-      });
-    }
-
-    if (newPassword !== confirmPassword) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "New passwords do not match" 
-      });
-    }
-
-<<<<<<< Updated upstream
-    // Enhanced password validation for admin
-    const passwordValidation = validatePassword(newPassword);
-    if (!passwordValidation.isValid) {
-      let errorMessage = "Password must contain:";
-      if (!passwordValidation.minLength) errorMessage += " at least 8 characters,";
-      if (!passwordValidation.hasUpperCase) errorMessage += " one uppercase letter,";
-      if (!passwordValidation.hasLowerCase) errorMessage += " one lowercase letter,";
-      if (!passwordValidation.hasTwoSpecialChars) errorMessage += " at least two special characters,";
-      
-      errorMessage = errorMessage.slice(0, -1) + '.';
-      return res.status(400).json({ 
-        success: false, 
-        message: errorMessage
-      });
-    }
-
-    // Find admin user
-    const adminUser = await UserModel.findOne({ email, role: 'admin' });
-    if (!adminUser) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "Admin account not found" 
-      });
-    }
-
-    // Verify current password using bcrypt
-    const isCurrentPasswordValid = await adminUser.comparePassword(currentPassword);
-    if (!isCurrentPasswordValid) {
-      return res.status(401).json({ 
-        success: false, 
-        message: "Current password is incorrect" 
-      });
-    }
-
-    // Update password in database
-    adminUser.password = newPassword;
-    await adminUser.save();
-
-    res.json({
-      success: true,
-      message: "Admin password changed successfully"
-    });
-=======
-    // Call the new function with appropriate parameters
-    req.body = { currentPassword, newPassword };
-    return changeAdminCredentials(req, res);
->>>>>>> Stashed changes
-  } catch (error) {
-    console.error('Change password error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: "An error occurred while changing password. Please try again." 
     });
   }
 };

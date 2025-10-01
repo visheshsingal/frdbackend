@@ -16,11 +16,6 @@ const userSchema = new mongoose.Schema({
     }
   },
   password: { type: String, required: true, minlength: 8 },
-  role: { 
-    type: String, 
-    enum: ['user', 'admin'], 
-    default: 'user' 
-  },
   cartData: { type: Object, default: {} },
   isVerified: { type: Boolean, default: false },
   otp: { type: String, default: null },
@@ -79,10 +74,6 @@ userSchema.methods.verifyOTP = function(enteredOtp) {
   return { isValid, message: isValid ? "OTP verified successfully" : "Invalid OTP" };
 };
 
-<<<<<<< Updated upstream
-const UserModel = mongoose.models.User || mongoose.model('User', userSchema);
-export default UserModel;
-=======
 // Admin seeding function
 userSchema.statics.ensureAdminExists = async function() {
   try {
@@ -138,6 +129,5 @@ userSchema.statics.ensureAdminExists = async function() {
   }
 };
 
-const UserModel = mongoose.models.User || mongoose.model('User ', userSchema); // Use singular 'User '
+const UserModel = mongoose.models.User || mongoose.model('User', userSchema);
 export default UserModel;
->>>>>>> Stashed changes

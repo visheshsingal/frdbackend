@@ -1,4 +1,3 @@
-<<<<<<< Updated upstream
 import express from 'express';
 import cors from 'cors';
 import 'dotenv/config';
@@ -9,49 +8,29 @@ import productRouter from './routes/productRoute.js';
 import cartRouter from './routes/cartRoute.js';
 import orderRouter from './routes/orderRoute.js';
 import bookingRouter from './routes/bookingRoute.js';
+import UserModel from './models/userModel.js';
 
 // App Config
 const app = express();
 const port = process.env.PORT || 4000;
-=======
-import express from 'express'
-import cors from 'cors'
-import 'dotenv/config'
-import connectDB from './config/mongodb.js'
-import connectCloudinary from './config/cloudinary.js'
-import userRouter from './routes/userRoute.js'
-import productRouter from './routes/productRoute.js'
-import cartRouter from './routes/cartRoute.js'
-import orderRouter from './routes/orderRoute.js'
-import bookingRouter from './routes/bookingRoute.js'
-import UserModel from './models/userModel.js'
-
-// App Config
-const app = express()
-const port = process.env.PORT || 4000
 
 // Initialize database and admin user
 const initializeApp = async () => {
   try {
-    await connectDB()
-    await connectCloudinary()
+    await connectDB();
+    await connectCloudinary();
     
     // Ensure admin user exists
-    await UserModel.ensureAdminExists()
+    await UserModel.ensureAdminExists();
     
-    console.log('Application initialized successfully')
+    console.log('Application initialized successfully');
   } catch (error) {
-    console.error('Error initializing application:', error)
-    process.exit(1)
+    console.error('Error initializing application:', error);
+    process.exit(1);
   }
-}
+};
 
-initializeApp()
->>>>>>> Stashed changes
-
-// Connect to MongoDB and Cloudinary
-connectDB();
-connectCloudinary();
+initializeApp();
 
 // Middlewares
 app.use(express.json());
