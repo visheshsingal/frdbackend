@@ -22,7 +22,7 @@ app.use(express.json());
 app.use(cors({
   origin: [
     'http://localhost:5174', // Local dev (Vite frontend)
-    'https://your-frontend.vercel.app' // Replace with your actual Vercel URL after deployment
+    'https://frdadmin.vercel.app/' // Replace with your actual Vercel URL after deployment
   ],
   credentials: true // Allow cookies/auth headers if needed
 }));
