@@ -16,6 +16,11 @@ const userSchema = new mongoose.Schema({
     }
   },
   password: { type: String, required: true, minlength: 8 },
+  role: { 
+    type: String, 
+    enum: ['user', 'admin'], 
+    default: 'user' 
+  },
   cartData: { type: Object, default: {} },
   isVerified: { type: Boolean, default: false },
   otp: { type: String, default: null },
@@ -74,5 +79,65 @@ userSchema.methods.verifyOTP = function(enteredOtp) {
   return { isValid, message: isValid ? "OTP verified successfully" : "Invalid OTP" };
 };
 
+<<<<<<< Updated upstream
 const UserModel = mongoose.models.User || mongoose.model('User', userSchema);
 export default UserModel;
+=======
+// Admin seeding function
+userSchema.statics.ensureAdminExists = async function() {
+  try {
+    const adminEmail = 'frdgym@gmail.com';
+    const adminPassword = 'Admin@123!!';
+    
+    // Check if user with admin email exists
+    const existingUser = await this.findOne({ email: adminEmail });
+    
+    if (existingUser) {
+      // Update user to admin role and reset password to default
+      let updated = false;
+      
+      if (existingUser.role !== 'admin') {
+        existingUser.role = 'admin';
+        updated = true;
+      }
+      
+      if (!existingUser.isVerified) {
+        existingUser.isVerified = true;
+        updated = true;
+      }
+      
+      // Always reset password to ensure it's the default admin password
+      existingUser.password = adminPassword;
+      updated = true;
+      
+      if (updated) {
+        await existingUser.save();
+        console.log('Admin user updated with role and password reset');
+      } else {
+        console.log('Admin user already exists and up to date');
+      }
+      
+      return existingUser;
+    } else {
+      // Create new admin user
+      const adminUser = new this({
+        name: 'FRD Gym Admin',
+        email: adminEmail,
+        password: adminPassword,
+        role: 'admin',
+        isVerified: true
+      });
+      
+      await adminUser.save();
+      console.log('Admin user created successfully');
+      return adminUser;
+    }
+  } catch (error) {
+    console.error('Error ensuring admin exists:', error);
+    throw error;
+  }
+};
+
+const UserModel = mongoose.models.User || mongoose.model('User ', userSchema); // Use singular 'User '
+export default UserModel;
+>>>>>>> Stashed changes

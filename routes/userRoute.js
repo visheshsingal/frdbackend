@@ -5,7 +5,8 @@ import {
   adminLogin,
   forgotPassword,
   resetPassword,
-  changeAdminPassword
+  changeAdminPassword,
+  changeAdminCredentials
 } from '../controllers/userController.js';
 import adminAuth from '../middleware/adminAuth.js';
 
@@ -20,5 +21,6 @@ userRouter.post('/reset-password', resetPassword);
 
 // Protected admin routes
 userRouter.post('/admin/change-password', adminAuth, changeAdminPassword);
+userRouter.post('/admin/change-credentials', adminAuth, changeAdminCredentials);
 
 export default userRouter;

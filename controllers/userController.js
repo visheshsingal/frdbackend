@@ -197,11 +197,19 @@ const adminLogin = async (req, res) => {
     if (!adminUser) {
       return res.status(401).json({ 
         success: false, 
+<<<<<<< Updated upstream
         message: "Admin account not found" 
       });
     }
 
     // Verify password using bcrypt
+=======
+        message: "Invalid admin credentials" 
+      });
+    }
+
+    // Verify password
+>>>>>>> Stashed changes
     const isPasswordValid = await adminUser.comparePassword(password);
     if (!isPasswordValid) {
       return res.status(401).json({ 
@@ -225,9 +233,16 @@ const adminLogin = async (req, res) => {
       success: true, 
       token,
       user: { 
+<<<<<<< Updated upstream
         email: adminUser.email, 
         role: 'admin',
         name: adminUser.name
+=======
+        id: adminUser._id,
+        name: adminUser.name,
+        email: adminUser.email, 
+        role: 'admin' 
+>>>>>>> Stashed changes
       }
     });
   } catch (error) {
@@ -236,7 +251,113 @@ const adminLogin = async (req, res) => {
   }
 };
 
-// Change Admin Password
+// Change Admin Credentials
+const changeAdminCredentials = async (req, res) => {
+  try {
+    const { currentPassword, newEmail, newPassword } = req.body;
+
+    // Validate current password is required
+    if (!currentPassword) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Current password is required" 
+      });
+    }
+
+    // At least one of newEmail or newPassword must be provided
+    if (!newEmail && !newPassword) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Either new email or new password must be provided" 
+      });
+    }
+
+    // Get current admin user from token (set by middleware)
+    const adminUser = await UserModel.findById(req.user.id);
+    if (!adminUser || adminUser.role !== 'admin') {
+      return res.status(403).json({ 
+        success: false, 
+        message: "Access denied" 
+      });
+    }
+
+    // Verify current password
+    const isCurrentPasswordValid = await adminUser.comparePassword(currentPassword);
+    if (!isCurrentPasswordValid) {
+      return res.status(401).json({ 
+        success: false, 
+        message: "Current password is incorrect" 
+      });
+    }
+
+    // Validate new email if provided
+    if (newEmail && !validator.isEmail(newEmail)) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Please provide a valid email address" 
+      });
+    }
+
+    // Validate new password if provided
+    if (newPassword) {
+      const passwordValidation = validatePassword(newPassword);
+      if (!passwordValidation.isValid) {
+        let errorMessage = "Password must contain:";
+        if (!passwordValidation.minLength) errorMessage += " at least 8 characters,";
+        if (!passwordValidation.hasUpperCase) errorMessage += " one uppercase letter,";
+        if (!passwordValidation.hasLowerCase) errorMessage += " one lowercase letter,";
+        if (!passwordValidation.hasTwoSpecialChars) errorMessage += " at least two special characters,";
+        
+        // Remove trailing comma and add period
+        errorMessage = errorMessage.slice(0, -1) + '.';
+        return res.status(400).json({ 
+          success: false, 
+          message: errorMessage
+        });
+      }
+    }
+
+    // Check if new email already exists (excluding current admin)
+    if (newEmail && newEmail !== adminUser.email) {
+      const existingUser = await UserModel.findOne({ email: newEmail });
+      if (existingUser) {
+        return res.status(400).json({ 
+          success: false, 
+          message: "Email address already in use" 
+        });
+      }
+    }
+
+    // Update credentials
+    if (newEmail) {
+      adminUser.email = newEmail;
+    }
+    if (newPassword) {
+      adminUser.password = newPassword; // Will be hashed by pre-save middleware
+    }
+
+    await adminUser.save();
+
+    res.json({
+      success: true,
+      message: "Admin credentials updated successfully",
+      user: {
+        id: adminUser._id,
+        name: adminUser.name,
+        email: adminUser.email,
+        role: adminUser.role
+      }
+    });
+  } catch (error) {
+    console.error('Change credentials error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: "An error occurred while updating credentials. Please try again." 
+    });
+  }
+};
+
+// Legacy function for backward compatibility
 const changeAdminPassword = async (req, res) => {
   try {
     const { currentPassword, newPassword, confirmPassword } = req.body;
@@ -257,6 +378,7 @@ const changeAdminPassword = async (req, res) => {
       });
     }
 
+<<<<<<< Updated upstream
     // Enhanced password validation for admin
     const passwordValidation = validatePassword(newPassword);
     if (!passwordValidation.isValid) {
@@ -299,6 +421,11 @@ const changeAdminPassword = async (req, res) => {
       success: true,
       message: "Admin password changed successfully"
     });
+=======
+    // Call the new function with appropriate parameters
+    req.body = { currentPassword, newPassword };
+    return changeAdminCredentials(req, res);
+>>>>>>> Stashed changes
   } catch (error) {
     console.error('Change password error:', error);
     res.status(500).json({ 
@@ -439,5 +566,6 @@ export {
   adminLogin,
   forgotPassword,
   resetPassword,
-  changeAdminPassword
+  changeAdminPassword,
+  changeAdminCredentials
 };
