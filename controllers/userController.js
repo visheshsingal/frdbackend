@@ -1,16 +1,6 @@
 import validator from "validator";
 import jwt from 'jsonwebtoken';
-import nodemailer from 'nodemailer';
 import UserModel from "../models/userModel.js";
-
-// Email transporter configuration
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
-  }
-});
 
 // Password validation function
 const validatePassword = (password) => {
@@ -38,154 +28,10 @@ const createToken = (id) => {
   });
 };
 
-// Send OTP email
-const sendOTPEmail = async (email, otp) => {
-  try {
-    console.log('Attempting to send OTP email to:', email);
-    console.log('Using email user:', process.env.EMAIL_USER);
-
-    const mailOptions = {
-      from: `"Admin System" <${process.env.EMAIL_USER}>`,
-      to: email,
-      subject: 'Your OTP for Password Change',
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #052659;">Admin Password Change OTP</h2>
-          <p>Your One-Time Password (OTP) for changing admin password is:</p>
-          <div style="background: #f5f5f5; padding: 15px; text-align: center; margin: 20px 0;">
-            <span style="font-size: 24px; font-weight: bold; color: #052659;">${otp}</span>
-          </div>
-          <p>This OTP is valid for 10 minutes.</p>
-          <p>If you didn't request this, please ignore this email.</p>
-        </div>
-      `
-    };
-
-    const info = await transporter.sendMail(mailOptions);
-    console.log('OTP email sent successfully:', info.messageId);
-    return true;
-  } catch (error) {
-    console.error('Failed to send OTP email:', error);
-    throw new Error('Failed to send OTP email: ' + error.message);
-  }
-};
-
-// Send OTP
-const sendOTP = async (req, res) => {
-  try {
-    const { email } = req.body;
-
-    if (!validator.isEmail(email)) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Please provide a valid email address" 
-      });
-    }
-
-    let user = await UserModel.findOne({ email });
-    const now = new Date();
-    
-    if (user && user.otpSentAt && (now - user.otpSentAt) < 30000) {
-      const secondsLeft = Math.ceil((30000 - (now - user.otpSentAt)) / 1000);
-      return res.status(429).json({ 
-        success: false, 
-        message: `Please wait ${secondsLeft} seconds before requesting a new OTP` 
-      });
-    }
-
-    if (!user) {
-      user = new UserModel({ 
-        email, 
-        name: "Temp User", 
-        password: "Temp@1234!!",
-        isTemp: true
-      });
-    }
-
-    const otp = user.generateOTP();
-    await user.save();
-    
-    await sendOTPEmail(email, otp);
-
-    res.json({ 
-      success: true, 
-      message: "OTP sent successfully. Please check your email.",
-      email: email
-    });
-  } catch (error) {
-    console.error('OTP sending error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: "An error occurred while sending OTP. Please try again later." 
-    });
-  }
-};
-
-// Verify OTP
-const verifyOTP = async (req, res) => {
-  try {
-    const { email, otp } = req.body;
-
-    if (!email || !otp) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Email and OTP are required" 
-      });
-    }
-
-    const user = await UserModel.findOne({ email });
-    if (!user) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "No account found with this email. Please register first." 
-      });
-    }
-
-    const verification = user.verifyOTP(otp);
-    if (!verification.isValid) {
-      return res.status(401).json({ 
-        success: false, 
-        message: verification.message || "Invalid or expired OTP",
-        isExpired: verification.isExpired
-      });
-    }
-
-    await user.save();
-    
-    if (user.isTemp) {
-      return res.json({ 
-        success: true, 
-        message: "OTP verified. Please complete your registration.",
-        requiresRegistration: true,
-        email: user.email
-      });
-    }
-
-    const token = createToken(user._id);
-    
-    res.json({
-      success: true,
-      message: "OTP verified successfully",
-      token,
-      user: {
-        name: user.name,
-        email: user.email,
-        isVerified: user.isVerified
-      }
-    });
-  } catch (error) {
-    console.error('OTP verification error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: "An error occurred during verification. Please try again." 
-    });
-  }
-};
-
 // Registration
 const registerUser = async (req, res) => {
   try {
-    const { name, email, password, otp } = req.body;
+    const { name, email, password } = req.body;
 
     if (!name || !email || !password) {
       return res.status(400).json({ 
@@ -218,73 +64,35 @@ const registerUser = async (req, res) => {
       });
     }
 
-    let user = await UserModel.findOne({ email });
+    const existingUser = await UserModel.findOne({ email });
 
-    if (user) {
-      if (!user.isTemp && user.password) {
-        return res.status(409).json({ 
-          success: false, 
-          message: "An account already exists with this email. Please login instead." 
-        });
-      }
-
-      if (otp) {
-        const verification = user.verifyOTP(otp);
-        if (!verification.isValid) {
-          return res.status(401).json({ 
-            success: false, 
-            message: verification.message || "Invalid or expired OTP",
-            isExpired: verification.isExpired
-          });
-        }
-        
-        user.name = name;
-        user.password = password;
-        user.isTemp = false;
-        user.isVerified = true;
-        await user.save();
-
-        const token = createToken(user._id);
-        return res.status(201).json({
-          success: true,
-          message: "Registration successful",
-          token,
-          user: {
-            name: user.name,
-            email: user.email,
-            isVerified: user.isVerified
-          }
-        });
-      } else {
-        const newOTP = user.generateOTP();
-        await user.save();
-        await sendOTPEmail(email, newOTP);
-        
-        return res.json({ 
-          success: true, 
-          message: "OTP sent to your email", 
-          requiresOTP: true,
-          email: user.email
-        });
-      }
+    if (existingUser) {
+      return res.status(409).json({ 
+        success: false, 
+        message: "An account already exists with this email. Please login instead." 
+      });
     }
 
     const newUser = new UserModel({ 
       name, 
       email, 
       password,
-      isVerified: false
+      isVerified: true // Auto-verify without OTP
     });
 
-    const newOTP = newUser.generateOTP();
     await newUser.save();
-    await sendOTPEmail(email, newOTP);
 
-    res.status(200).json({ 
-      success: true, 
-      message: "OTP sent to your email for verification",
-      requiresOTP: true,
-      email: newUser.email
+    const token = createToken(newUser._id);
+    
+    res.status(201).json({
+      success: true,
+      message: "Registration successful",
+      token,
+      user: {
+        name: newUser.name,
+        email: newUser.email,
+        isVerified: newUser.isVerified
+      }
     });
   } catch (error) {
     console.error('Registration error:', error);
@@ -298,7 +106,7 @@ const registerUser = async (req, res) => {
 // Login
 const loginUser = async (req, res) => {
   try {
-    const { email, password, otp } = req.body;
+    const { email, password } = req.body;
 
     if (!email || !password) {
       return res.status(400).json({ 
@@ -319,33 +127,7 @@ const loginUser = async (req, res) => {
     if (!isPasswordValid) {
       return res.status(401).json({ 
         success: false, 
-        message: "Incorrect email or password",
-        requiresOTP: false
-      });
-    }
-
-    if (otp) {
-      const verification = user.verifyOTP(otp);
-      if (!verification.isValid) {
-        return res.status(401).json({ 
-          success: false, 
-          message: verification.message || "Invalid or expired OTP",
-          isExpired: verification.isExpired,
-          requiresOTP: true
-        });
-      }
-      
-      await user.save();
-    } else {
-      const newOTP = user.generateOTP();
-      await user.save();
-      await sendOTPEmail(email, newOTP);
-      
-      return res.json({ 
-        success: true, 
-        message: "OTP sent to your email for verification",
-        requiresOTP: true,
-        email: user.email
+        message: "Incorrect email or password"
       });
     }
 
@@ -415,74 +197,13 @@ const adminLogin = async (req, res) => {
   }
 };
 
-// Change Admin Password - Send OTP
-const changeAdminPasswordSendOTP = async (req, res) => {
+// Change Admin Password
+const changeAdminPassword = async (req, res) => {
   try {
-    const { currentPassword } = req.body;
-    const adminEmail = 'frdgym@gmail.com';
-    const otpEmail = 'vishesh.singal.contact@gmail.com';
-
-    console.log('Change password OTP request received');
-
-    // Verify current password
-    const isCurrentPasswordValid = currentPassword === process.env.ADMIN_PASSWORD || currentPassword === 'Admin@123!!';
-    
-    if (!isCurrentPasswordValid) {
-      console.log('Current password invalid');
-      return res.status(401).json({ 
-        success: false, 
-        message: "Current password is incorrect" 
-      });
-    }
-
-    console.log('Current password verified');
-
-    // Find or create admin user for OTP
-    let adminUser = await UserModel.findOne({ email: adminEmail });
-    if (!adminUser) {
-      console.log('Creating new admin user for OTP');
-      adminUser = new UserModel({ 
-        email: adminEmail, 
-        name: "Admin User", 
-        password: process.env.ADMIN_PASSWORD || 'Admin@123!!',
-        isTemp: false
-      });
-    }
-
-    // Generate OTP
-    const otp = adminUser.generateOTP();
-    await adminUser.save();
-    
-    console.log('OTP generated:', otp);
-    console.log('Sending OTP to:', otpEmail);
-
-    // Send OTP to vishesh.singal.contact@gmail.com
-    await sendOTPEmail(otpEmail, otp);
-
-    console.log('OTP sent successfully');
-
-    res.json({ 
-      success: true, 
-      message: "OTP sent to registered email for password change",
-      email: otpEmail
-    });
-  } catch (error) {
-    console.error('Change password OTP error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message || "An error occurred while sending OTP. Please try again." 
-    });
-  }
-};
-
-// Change Admin Password - Verify OTP and Update
-const changeAdminPasswordVerify = async (req, res) => {
-  try {
-    const { currentPassword, newPassword, confirmPassword, otp } = req.body;
-    const adminEmail = 'frdgym@gmail.com';
+    const { currentPassword, newPassword, confirmPassword } = req.body;
 
     // Validate inputs
-    if (!currentPassword || !newPassword || !confirmPassword || !otp) {
+    if (!currentPassword || !newPassword || !confirmPassword) {
       return res.status(400).json({ 
         success: false, 
         message: "All fields are required" 
@@ -522,35 +243,15 @@ const changeAdminPasswordVerify = async (req, res) => {
       });
     }
 
-    // Find admin user and verify OTP
-    const adminUser = await UserModel.findOne({ email: adminEmail });
-    if (!adminUser) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "Admin user not found" 
-      });
-    }
-
-    const verification = adminUser.verifyOTP(otp);
-    if (!verification.isValid) {
-      return res.status(401).json({ 
-        success: false, 
-        message: verification.message || "Invalid or expired OTP",
-        isExpired: verification.isExpired
-      });
-    }
-
-    // Update environment variable and admin user password
+    // Update environment variable
     process.env.ADMIN_PASSWORD = newPassword;
-    adminUser.password = newPassword;
-    await adminUser.save();
 
     res.json({
       success: true,
       message: "Admin password changed successfully"
     });
   } catch (error) {
-    console.error('Change password verification error:', error);
+    console.error('Change password error:', error);
     res.status(500).json({ 
       success: false, 
       message: "An error occurred while changing password. Please try again." 
@@ -578,54 +279,7 @@ const forgotPassword = async (req, res) => {
       });
     }
 
-    const otp = user.generateOTP();
-    await user.save();
-    
-    await sendOTPEmail(email, otp);
-
-    res.json({ 
-      success: true, 
-      message: "Password reset OTP sent successfully. Please check your email.",
-      email: email
-    });
-  } catch (error) {
-    console.error('Forgot password error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: "An error occurred. Please try again later." 
-    });
-  }
-};
-
-// Verify Reset OTP
-const verifyResetOTP = async (req, res) => {
-  try {
-    const { email, otp } = req.body;
-
-    if (!email || !otp) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Email and OTP are required" 
-      });
-    }
-
-    const user = await UserModel.findOne({ email });
-    if (!user) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "No account found with this email." 
-      });
-    }
-
-    const verification = user.verifyOTP(otp);
-    if (!verification.isValid) {
-      return res.status(401).json({ 
-        success: false, 
-        message: verification.message || "Invalid or expired OTP",
-        isExpired: verification.isExpired
-      });
-    }
-
+    // Generate reset token (valid for 15 minutes)
     const resetToken = jwt.sign(
       { 
         id: user._id,
@@ -635,19 +289,17 @@ const verifyResetOTP = async (req, res) => {
       { expiresIn: '15m' }
     );
 
-    await user.save();
-
-    res.json({
-      success: true,
-      message: "OTP verified successfully",
+    res.json({ 
+      success: true, 
+      message: "Password reset initiated",
       resetToken,
-      email: user.email
+      email: email
     });
   } catch (error) {
-    console.error('OTP verification error:', error);
+    console.error('Forgot password error:', error);
     res.status(500).json({ 
       success: false, 
-      message: "An error occurred during verification. Please try again." 
+      message: "An error occurred. Please try again later." 
     });
   }
 };
@@ -739,11 +391,7 @@ export {
   loginUser,
   registerUser,
   adminLogin,
-  sendOTP,
-  verifyOTP,
   forgotPassword,
-  verifyResetOTP,
   resetPassword,
-  changeAdminPasswordSendOTP,
-  changeAdminPasswordVerify
+  changeAdminPassword
 };
