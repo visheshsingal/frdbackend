@@ -10,16 +10,26 @@ const adminAuth = async (req, res, next) => {
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     
-    // Check if user exists and is admin
-    const user = await UserModel.findById(decoded.id);
+    // Handle different token formats
+    let user;
+    if (decoded.id) {
+      // New format: token has user ID
+      user = await UserModel.findById(decoded.id);
+    } else if (decoded.email) {
+      // Old format: token has only email
+      user = await UserModel.findOne({ email: decoded.email, isAdmin: true });
+    } else {
+      return res.status(401).json({ success: false, message: "Invalid token format" });
+    }
+    
     if (!user || !user.isAdmin || user.email !== 'frdgym@gmail.com') {
       return res.status(401).json({ success: false, message: "Not Authorized Login Again" });
     }
 
-    req.user = user; // Attach user to request
+    req.user = user;
     next();
   } catch (error) {
-    console.log(error);
+    console.log('Admin auth error:', error);
     res.status(401).json({ success: false, message: "Not Authorized Login Again" });
   }
 }

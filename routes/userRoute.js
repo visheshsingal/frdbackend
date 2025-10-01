@@ -9,7 +9,8 @@ import {
   verifyResetOTP,
   resetPassword,
   changeAdminPasswordSendOTP,
-  changeAdminPasswordVerify
+  changeAdminPasswordVerify,
+  checkAdmin
 } from '../controllers/userController.js';
 import adminAuth from '../middleware/adminAuth.js';
 
@@ -25,5 +26,6 @@ userRouter.post('/verify-reset-otp', verifyResetOTP);
 userRouter.post('/reset-password', resetPassword);
 userRouter.post('/admin/change-password/send-otp', adminAuth, changeAdminPasswordSendOTP);
 userRouter.post('/admin/change-password/verify', adminAuth, changeAdminPasswordVerify);
+userRouter.get('/check-admin', checkAdmin);
 
 export default userRouter;

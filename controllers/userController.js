@@ -3,29 +3,6 @@ import jwt from 'jsonwebtoken';
 import nodemailer from 'nodemailer';
 import UserModel from "../models/userModel.js";
 
-// Initialize Admin User (call this when server starts)
-export const initializeAdmin = async () => {
-  try {
-    const adminExists = await UserModel.findOne({ email: 'frdgym@gmail.com', isAdmin: true });
-    if (!adminExists) {
-      const adminUser = new UserModel({
-        email: 'frdgym@gmail.com',
-        password: process.env.INITIAL_ADMIN_PASSWORD || 'Admin@123!!',
-        name: 'Admin User',
-        role: 'admin',
-        isAdmin: true,
-        isVerified: true
-      });
-      await adminUser.save();
-      console.log('Admin user created successfully');
-    } else {
-      console.log('Admin user already exists');
-    }
-  } catch (error) {
-    console.log('Error initializing admin:', error.message);
-  }
-};
-
 // Email transporter configuration
 const createTransporter = () => {
   if (process.env.NODE_ENV === 'production') {
@@ -68,8 +45,7 @@ const validatePassword = (password) => {
     minLength,
     hasUpperCase,
     hasLowerCase,
-    hasTwoSpecialChars,
-    specialCharCount: specialChars ? specialChars.length : 0
+    hasTwoSpecialChars
   };
 };
 
@@ -81,17 +57,38 @@ const createToken = (id) => {
   });
 };
 
+// Initialize Admin User
+const initializeAdmin = async () => {
+  try {
+    const adminExists = await UserModel.findOne({ email: 'frdgym@gmail.com', isAdmin: true });
+    if (!adminExists) {
+      const adminUser = new UserModel({
+        email: 'frdgym@gmail.com',
+        password: process.env.INITIAL_ADMIN_PASSWORD || 'Admin@123!!',
+        name: 'Admin User',
+        role: 'admin',
+        isAdmin: true,
+        isVerified: true
+      });
+      await adminUser.save();
+      console.log('Admin user created successfully');
+    }
+  } catch (error) {
+    console.log('Admin user already exists');
+  }
+};
+
 // Send OTP email
 const sendOTPEmail = async (email, otp) => {
   const transporter = createTransporter();
   
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
-      reject(new Error('Email sending timeout - please try again'));
+      reject(new Error('Email sending timeout'));
     }, 20000);
 
     try {
-      console.log('Attempting to send OTP email to:', email);
+      console.log('Sending OTP email to:', email);
 
       const mailOptions = {
         from: `"Admin System" <${process.env.EMAIL_USER}>`,
@@ -115,13 +112,7 @@ const sendOTPEmail = async (email, otp) => {
         
         if (error) {
           console.error('Email sending failed:', error);
-          if (error.code === 'ECONNECTION' || error.code === 'ETIMEDOUT') {
-            reject(new Error('Unable to connect to email service.'));
-          } else if (error.code === 'EAUTH') {
-            reject(new Error('Email authentication failed.'));
-          } else {
-            reject(new Error('Failed to send OTP email. Please try again.'));
-          }
+          reject(new Error('Failed to send OTP email. Please try again.'));
         } else {
           console.log('OTP email sent successfully');
           resolve(true);
@@ -182,7 +173,7 @@ const sendOTP = async (req, res) => {
     console.error('OTP sending error:', error);
     res.status(500).json({ 
       success: false, 
-      message: error.message || "An error occurred while sending OTP. Please try again later." 
+      message: error.message
     });
   }
 };
@@ -422,9 +413,7 @@ const loginUser = async (req, res) => {
       user: {
         name: user.name,
         email: user.email,
-        isVerified: user.isVerified,
-        role: user.role,
-        isAdmin: user.isAdmin
+        isVerified: user.isVerified
       }
     });
   } catch (error) {
@@ -495,13 +484,12 @@ const adminLogin = async (req, res) => {
 const changeAdminPasswordSendOTP = async (req, res) => {
   try {
     const { currentPassword } = req.body;
-    const adminEmail = 'frdgym@gmail.com';
     const otpEmail = 'vishesh.singal.contact@gmail.com';
 
     console.log('Change password OTP request received');
 
-    // Find admin user
-    const adminUser = await UserModel.findOne({ email: adminEmail, isAdmin: true });
+    // Find admin user from request (set by adminAuth middleware)
+    const adminUser = req.user;
     if (!adminUser) {
       return res.status(404).json({ 
         success: false, 
@@ -512,7 +500,6 @@ const changeAdminPasswordSendOTP = async (req, res) => {
     // Verify current password against database
     const isCurrentPasswordValid = await adminUser.comparePassword(currentPassword);
     if (!isCurrentPasswordValid) {
-      console.log('Current password invalid');
       return res.status(401).json({ 
         success: false, 
         message: "Current password is incorrect" 
@@ -526,7 +513,6 @@ const changeAdminPasswordSendOTP = async (req, res) => {
     await adminUser.save();
     
     console.log('OTP generated:', otp);
-    console.log('Sending OTP to:', otpEmail);
 
     // Send OTP
     await sendOTPEmail(otpEmail, otp);
@@ -540,18 +526,9 @@ const changeAdminPasswordSendOTP = async (req, res) => {
     });
   } catch (error) {
     console.error('Change password OTP error:', error);
-    
-    let errorMessage = "An error occurred while sending OTP. Please try again.";
-    
-    if (error.message.includes('platform restriction') || error.message.includes('Unable to connect')) {
-      errorMessage = "Email service is currently unavailable. Please try again later.";
-    } else if (error.message.includes('authentication failed')) {
-      errorMessage = "Email configuration error. Please contact administrator.";
-    }
-    
     res.status(500).json({ 
       success: false, 
-      message: errorMessage
+      message: error.message || "An error occurred while sending OTP. Please try again."
     });
   }
 };
@@ -560,7 +537,6 @@ const changeAdminPasswordSendOTP = async (req, res) => {
 const changeAdminPasswordVerify = async (req, res) => {
   try {
     const { currentPassword, newPassword, confirmPassword, otp } = req.body;
-    const adminEmail = 'frdgym@gmail.com';
 
     // Validate inputs
     if (!currentPassword || !newPassword || !confirmPassword || !otp) {
@@ -593,8 +569,8 @@ const changeAdminPasswordVerify = async (req, res) => {
       });
     }
 
-    // Find admin user
-    const adminUser = await UserModel.findOne({ email: adminEmail, isAdmin: true });
+    // Find admin user from request
+    const adminUser = req.user;
     if (!adminUser) {
       return res.status(404).json({ 
         success: false, 
@@ -813,6 +789,25 @@ const resetPassword = async (req, res) => {
   }
 };
 
+// Debug route to check admin user
+const checkAdmin = async (req, res) => {
+  try {
+    const admin = await UserModel.findOne({ email: 'frdgym@gmail.com', isAdmin: true });
+    res.json({ 
+      success: true, 
+      adminExists: !!admin,
+      admin: admin ? {
+        email: admin.email,
+        name: admin.name,
+        isAdmin: admin.isAdmin,
+        role: admin.role
+      } : null
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+}
+
 export {
   loginUser,
   registerUser,
@@ -824,4 +819,6 @@ export {
   resetPassword,
   changeAdminPasswordSendOTP,
   changeAdminPasswordVerify,
+  checkAdmin,
+  initializeAdmin
 };
