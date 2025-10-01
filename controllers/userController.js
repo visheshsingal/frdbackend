@@ -5,6 +5,8 @@ import UserModel from "../models/userModel.js";
 
 // Email transporter configuration
 const createTransporter = () => {
+  console.log('Creating email transporter for:', process.env.NODE_ENV);
+  
   if (process.env.NODE_ENV === 'production') {
     return nodemailer.createTransport({
       host: 'smtp.gmail.com',
@@ -72,59 +74,47 @@ const initializeAdmin = async () => {
       });
       await adminUser.save();
       console.log('Admin user created successfully');
+    } else {
+      console.log('Admin user already exists');
     }
   } catch (error) {
-    console.log('Admin user already exists');
+    console.log('Error initializing admin:', error.message);
   }
 };
 
 // Send OTP email
 const sendOTPEmail = async (email, otp) => {
-  const transporter = createTransporter();
+  console.log('SEND OTP EMAIL: Starting for', email);
   
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      reject(new Error('Email sending timeout'));
-    }, 20000);
-
-    try {
-      console.log('Sending OTP email to:', email);
-
-      const mailOptions = {
-        from: `"Admin System" <${process.env.EMAIL_USER}>`,
-        to: email,
-        subject: 'Your OTP for Password Change',
-        html: `
-          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-            <h2 style="color: #052659;">Admin Password Change OTP</h2>
-            <p>Your One-Time Password (OTP) for changing admin password is:</p>
-            <div style="background: #f5f5f5; padding: 15px; text-align: center; margin: 20px 0;">
-              <span style="font-size: 24px; font-weight: bold; color: #052659;">${otp}</span>
-            </div>
-            <p>This OTP is valid for 10 minutes.</p>
-            <p>If you didn't request this, please ignore this email.</p>
+  try {
+    const transporter = createTransporter();
+    
+    const mailOptions = {
+      from: `"Admin System" <${process.env.EMAIL_USER}>`,
+      to: email,
+      subject: 'Your OTP for Password Change',
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #052659;">Admin Password Change OTP</h2>
+          <p>Your One-Time Password (OTP) for changing admin password is:</p>
+          <div style="background: #f5f5f5; padding: 15px; text-align: center; margin: 20px 0;">
+            <span style="font-size: 24px; font-weight: bold; color: #052659;">${otp}</span>
           </div>
-        `
-      };
+          <p>This OTP is valid for 10 minutes.</p>
+          <p>If you didn't request this, please ignore this email.</p>
+        </div>
+      `
+    };
 
-      transporter.sendMail(mailOptions, (error, info) => {
-        clearTimeout(timeout);
-        
-        if (error) {
-          console.error('Email sending failed:', error);
-          reject(new Error('Failed to send OTP email. Please try again.'));
-        } else {
-          console.log('OTP email sent successfully');
-          resolve(true);
-        }
-      });
+    console.log('SEND OTP EMAIL: Sending email...');
+    const info = await transporter.sendMail(mailOptions);
+    console.log('SEND OTP EMAIL: Email sent successfully');
+    return true;
 
-    } catch (error) {
-      clearTimeout(timeout);
-      console.error('Unexpected error in sendOTPEmail:', error);
-      reject(new Error('Unexpected error while sending OTP email'));
-    }
-  });
+  } catch (error) {
+    console.error('SEND OTP EMAIL ERROR:', error);
+    throw new Error('Failed to send OTP email: ' + error.message);
+  }
 };
 
 // Send OTP
@@ -483,37 +473,50 @@ const adminLogin = async (req, res) => {
 // Change Admin Password - Send OTP
 const changeAdminPasswordSendOTP = async (req, res) => {
   try {
-    const { currentPassword, email = 'frdgym@gmail.com' } = req.body;
+    console.log('=== ADMIN OTP REQUEST START ===');
+    const { currentPassword } = req.body;
     const otpEmail = 'vishesh.singal.contact@gmail.com';
 
-    console.log('Admin change password OTP request');
+    console.log('1. Request received with currentPassword:', !!currentPassword);
 
     // Find admin user
     const adminUser = await UserModel.findOne({ email: 'frdgym@gmail.com', isAdmin: true });
+    console.log('2. Admin user found:', !!adminUser);
+    
     if (!adminUser) {
+      console.log('3. ADMIN USER NOT FOUND IN DATABASE');
       return res.status(404).json({ 
         success: false, 
         message: "Admin user not found" 
       });
     }
 
+    console.log('4. Verifying current password...');
     // Verify current password
     const isCurrentPasswordValid = await adminUser.comparePassword(currentPassword);
+    console.log('5. Password valid:', isCurrentPasswordValid);
+    
     if (!isCurrentPasswordValid) {
+      console.log('6. PASSWORD INVALID');
       return res.status(401).json({ 
         success: false, 
         message: "Current password is incorrect" 
       });
     }
 
+    console.log('7. Generating OTP...');
     // Generate OTP
     const otp = adminUser.generateOTP();
     await adminUser.save();
     
-    console.log('OTP generated for admin:', otp);
+    console.log('8. OTP generated:', otp);
 
-    // Send OTP - THIS IS THE SAME CODE THAT WORKS FOR USERS
+    console.log('9. Sending OTP to:', otpEmail);
+    // Send OTP
     await sendOTPEmail(otpEmail, otp);
+
+    console.log('10. OTP sent successfully');
+    console.log('=== ADMIN OTP REQUEST END ===');
 
     res.json({ 
       success: true, 
@@ -521,7 +524,11 @@ const changeAdminPasswordSendOTP = async (req, res) => {
       email: otpEmail
     });
   } catch (error) {
-    console.error('Admin OTP error:', error);
+    console.error('=== ADMIN OTP ERROR ===');
+    console.error('Error:', error.message);
+    console.error('Full error:', error);
+    console.error('=== ADMIN OTP ERROR END ===');
+    
     res.status(500).json({ 
       success: false, 
       message: error.message 
