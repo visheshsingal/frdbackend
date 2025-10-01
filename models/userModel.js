@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
-import validator from "validator"; // Importing validator for email validation
+import validator from "validator";
 
 const userSchema = new mongoose.Schema({
   name: { type: String, required: true },
@@ -10,17 +10,19 @@ const userSchema = new mongoose.Schema({
     unique: true,
     validate: {
       validator: function(v) {
-        return validator.isEmail(v); // Using validator for email validation
+        return validator.isEmail(v);
       },
       message: props => `${props.value} is not a valid email address!`
     }
   },
   password: { type: String, required: true, minlength: 8 },
+  role: { type: String, enum: ['user', 'admin'], default: 'user' },
+  isAdmin: { type: Boolean, default: false },
   cartData: { type: Object, default: {} },
   isVerified: { type: Boolean, default: false },
   otp: { type: String, default: null },
   otpExpiry: { type: Date, default: null },
-  otpSentAt: { type: Date, default: null } // Track when OTP was sent
+  otpSentAt: { type: Date, default: null }
 }, { 
   minimize: false,
   timestamps: true 
@@ -45,10 +47,10 @@ userSchema.methods.comparePassword = async function(candidatePassword) {
 
 // Generate OTP
 userSchema.methods.generateOTP = function() {
-  const otp = Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit OTP
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
   this.otp = otp;
-  this.otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // OTP valid for 10 minutes
-  this.otpSentAt = new Date(); // Set the time when OTP is sent
+  this.otpExpiry = new Date(Date.now() + 10 * 60 * 1000);
+  this.otpSentAt = new Date();
   return otp;
 };
 
@@ -65,13 +67,13 @@ userSchema.methods.verifyOTP = function(enteredOtp) {
 
   const isValid = this.otp === enteredOtp;
   if (isValid) {
-    this.isVerified = true; // Mark user as verified
-    this.otp = null; // Clear OTP after verification
-    this.otpExpiry = null; // Clear OTP expiry after verification
+    this.isVerified = true;
+    this.otp = null;
+    this.otpExpiry = null;
   }
   
   return { isValid, message: isValid ? "OTP verified successfully" : "Invalid OTP" };
 };
 
-const UserModel = mongoose.models.User || mongoose.model('User ', userSchema); // Use singular 'User '
+const UserModel = mongoose.models.User || mongoose.model('User', userSchema);
 export default UserModel;
