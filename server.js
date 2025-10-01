@@ -8,18 +8,12 @@ import productRouter from './routes/productRoute.js'
 import cartRouter from './routes/cartRoute.js'
 import orderRouter from './routes/orderRoute.js'
 import bookingRouter from './routes/bookingRoute.js'
-import { initializeAdmin } from './controllers/userController.js' // Add this import
 
 // App Config
 const app = express()
 const port = process.env.PORT || 4000
 connectDB()
 connectCloudinary()
-
-// Initialize admin user after DB connection
-connectDB().then(() => {
-  initializeAdmin(); // This will create admin user if it doesn't exist
-});
 
 // middlewares
 app.use(express.json())
