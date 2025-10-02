@@ -164,6 +164,7 @@ const loginUser = async (req, res) => {
       message: "Login successful",
       token,
       user: {
+        _id: user._id, // Added missing _id field
         name: user.name,
         email: user.email,
         isVerified: user.isVerified,
