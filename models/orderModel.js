@@ -10,7 +10,8 @@ const orderSchema = new mongoose.Schema({
     payment: { type: Boolean, required: true , default: false },
     date: {type: Number, required:true},
     adminNotes: { type: String, default: '' },
-    userNotes: { type: String, default: '' }
+    userNotes: { type: String, default: '' },
+    trackingUrl: { type: String, default: '' }
 })
 
 const orderModel = mongoose.models.order || mongoose.model('order',orderSchema)

@@ -395,6 +395,34 @@ const updateNotes = async (req, res) => {
     }
 }
 
+// Update tracking URL for order
+const updateTrackingUrl = async (req, res) => {
+    try {
+        const { orderId, trackingUrl } = req.body;
+
+        if (!orderId) {
+            return res.json({ 
+                success: false, 
+                message: "Order ID is required" 
+            });
+        }
+
+        await orderModel.findByIdAndUpdate(orderId, { trackingUrl });
+        
+        res.json({ 
+            success: true, 
+            message: "Tracking URL updated successfully" 
+        });
+
+    } catch (error) {
+        console.log('Update Tracking URL Error:', error);
+        res.json({ 
+            success: false, 
+            message: error.message 
+        });
+    }
+}
+
 // Update user notes for order
 const updateUserNotes = async (req, res) => {
     try {
@@ -555,5 +583,5 @@ const cancelOrder = async (req, res) => {
 
 export {
     verifyRazorpay, verifyStripe, placeOrder, placeOrderStripe,
-    placeOrderRazorpay, allOrders, userOrders, updateStatus, cancelOrder, updateNotes, updateUserNotes
+    placeOrderRazorpay, allOrders, userOrders, updateStatus, cancelOrder, updateNotes, updateUserNotes, updateTrackingUrl
 }

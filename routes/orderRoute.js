@@ -10,7 +10,8 @@ import {
   verifyRazorpay,
   cancelOrder,
   updateNotes,
-  updateUserNotes
+  updateUserNotes,
+  updateTrackingUrl
 } from '../controllers/orderController.js'
 import adminAuth from '../middleware/adminAuth.js'
 import authUser from '../middleware/auth.js'
@@ -22,6 +23,7 @@ orderRouter.post('/list', adminAuth, allOrders)
 orderRouter.post('/status', adminAuth, updateStatus)
 orderRouter.post('/cancel', adminAuth, cancelOrder) // New cancellation route
 orderRouter.post('/notes', adminAuth, updateNotes) // New notes route
+orderRouter.post('/tracking', adminAuth, updateTrackingUrl) // New tracking route
 
 // Payment Features
 orderRouter.post('/place', authUser, placeOrder)
