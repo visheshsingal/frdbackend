@@ -367,6 +367,62 @@ const updateStatus = async (req, res) => {
     }
 }
 
+// Update admin notes for order
+const updateNotes = async (req, res) => {
+    try {
+        const { orderId, adminNotes } = req.body;
+
+        if (!orderId) {
+            return res.json({ 
+                success: false, 
+                message: "Order ID is required" 
+            });
+        }
+
+        await orderModel.findByIdAndUpdate(orderId, { adminNotes });
+        
+        res.json({ 
+            success: true, 
+            message: "Notes updated successfully" 
+        });
+
+    } catch (error) {
+        console.log('Update Notes Error:', error);
+        res.json({ 
+            success: false, 
+            message: error.message 
+        });
+    }
+}
+
+// Update user notes for order
+const updateUserNotes = async (req, res) => {
+    try {
+        const { orderId, userNotes } = req.body;
+
+        if (!orderId) {
+            return res.json({ 
+                success: false, 
+                message: "Order ID is required" 
+            });
+        }
+
+        await orderModel.findByIdAndUpdate(orderId, { userNotes });
+        
+        res.json({ 
+            success: true, 
+            message: "Special request updated successfully" 
+        });
+
+    } catch (error) {
+        console.log('Update User Notes Error:', error);
+        res.json({ 
+            success: false, 
+            message: error.message 
+        });
+    }
+}
+
 // ✅ IMPROVED CANCEL ORDER WITH BETTER EMAIL HANDLING
 const cancelOrder = async (req, res) => {
     try {
@@ -499,5 +555,5 @@ const cancelOrder = async (req, res) => {
 
 export {
     verifyRazorpay, verifyStripe, placeOrder, placeOrderStripe,
-    placeOrderRazorpay, allOrders, userOrders, updateStatus, cancelOrder
+    placeOrderRazorpay, allOrders, userOrders, updateStatus, cancelOrder, updateNotes, updateUserNotes
 }
